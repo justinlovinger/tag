@@ -8,5 +8,6 @@ edition = "2021"
 [dependencies]
 
 [dev-dependencies]
+lazy_static = "1.4.0"
 proptest = "1.0.0"
 test-strategy = "0.3.0"

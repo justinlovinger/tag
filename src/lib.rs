@@ -1,3 +1,6 @@
+const SEPARATORS: [char; 2] = ['-', '/'];
+const TAG_END: char = '_';
+
 #[derive(Clone, Debug)]
 pub struct TaggedFile {
     file: String,
@@ -13,7 +16,7 @@ impl TaggedFile {
         let mut tags = Vec::new();
         let mut tag_start = 0;
         for (i, c) in file.char_indices() {
-            if c == '-' || c == '/' {
+            if SEPARATORS.contains(&c) {
                 if i == tag_start {
                     return None;
                 } else {
@@ -22,7 +25,7 @@ impl TaggedFile {
                 // This slice index is safe
                 // because all separaters are one byte.
                 tag_start = i + 1;
-            } else if c == '_' && i == tag_start {
+            } else if c == TAG_END && i == tag_start {
                 return Some(TaggedFile {
                     // This slice index is safe
                     // because the tag-end character is one byte.
@@ -54,6 +57,7 @@ impl TaggedFile {
 mod tests {
     use std::fmt;
 
+    use lazy_static::lazy_static;
     use proptest::{
         prelude::{prop::collection::vec, *},
         test_runner::FileFailurePersistence,
@@ -75,7 +79,10 @@ mod tests {
 
     #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
     fn new_tagged_file_returns_none_for_non_tagged_files(s: String) {
-        prop_assume!(!(s.starts_with('_') || s.contains("-_") || s.contains("/_")));
+        prop_assume!(
+            !(s.starts_with(TAG_END)
+                || SEPARATORS.map(|c| format!("{}{}", c, TAG_END)).contains(&s))
+        );
         prop_assert!(TaggedFile::new(s).is_none());
     }
 
@@ -113,7 +120,8 @@ mod tests {
                 tag.fmt(f)?;
                 sep.fmt(f)?;
             }
-            write!(f, "_{}", self.name)
+            TAG_END.fmt(f)?;
+            self.name.fmt(f)
         }
     }
 
@@ -126,8 +134,8 @@ mod tests {
                 r"\PC*",
                 (0_usize..16).prop_flat_map(|len| {
                     (
-                        vec(r"[^-/_]([^-/]*[^-/_])?", len),
-                        vec(r"[-/]", len).prop_map(|xs| {
+                        vec(TAG_REGEX.as_str(), len),
+                        vec(SEPARATOR_REGEX.as_str(), len).prop_map(|xs| {
                             xs.into_iter()
                                 .map(|s| s.chars().next().expect("at least one character"))
                                 .collect()
@@ -138,5 +146,16 @@ mod tests {
                 .prop_map(|(name, (tags, seps))| Self { name, tags, seps })
                 .boxed()
         }
+    }
+
+    lazy_static! {
+        static ref SEPARATORS_STRING: String = SEPARATORS.iter().collect();
+        static ref SEPARATORS_AND_ENDS: String = format!("{}{}", *SEPARATORS_STRING, TAG_END);
+        static ref TAG_REGEX: String = format!(
+            "[^{sae}]([^{s}]*[^{sae}])?",
+            sae = *SEPARATORS_AND_ENDS,
+            s = *SEPARATORS_STRING
+        );
+        static ref SEPARATOR_REGEX: String = format!("[{}]", SEPARATORS_STRING.deref());
     }
 }
