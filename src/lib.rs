@@ -3,7 +3,7 @@ const TAG_END: char = '_';
 
 #[derive(Clone, Debug)]
 pub struct TaggedFile {
-    file: String,
+    path: String,
     name: SliceIndices,
     tags: Vec<SliceIndices>,
 }
@@ -12,10 +12,10 @@ pub struct TaggedFile {
 struct SliceIndices(usize, usize);
 
 impl TaggedFile {
-    pub fn new(file: String) -> Option<TaggedFile> {
+    pub fn new(path: String) -> Option<TaggedFile> {
         let mut tags = Vec::new();
         let mut tag_start = 0;
-        for (i, c) in file.char_indices() {
+        for (i, c) in path.char_indices() {
             if SEPARATORS.contains(&c) {
                 if i == tag_start {
                     return None;
@@ -29,8 +29,8 @@ impl TaggedFile {
                 return Some(TaggedFile {
                     // This slice index is safe
                     // because the tag-end character is one byte.
-                    name: SliceIndices(i + 1, file.len()),
-                    file,
+                    name: SliceIndices(i + 1, path.len()),
+                    path,
                     tags,
                 });
             }
@@ -49,7 +49,7 @@ impl TaggedFile {
     fn slice(&self, x: SliceIndices) -> &str {
         // This is safe when used with already verified slfile: s
         // from the same instance.
-        unsafe { self.file.get_unchecked(x.0..x.1) }
+        unsafe { self.path.get_unchecked(x.0..x.1) }
     }
 }
 
