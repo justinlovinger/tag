@@ -46,6 +46,17 @@ impl TaggedFile {
         self.tags.iter().copied().map(|x| self.slice(x))
     }
 
+    pub fn tags_str(&self) -> Option<&str> {
+        // This is safe
+        // because slice indices are at character bounds
+        // and +1 is safe
+        // because all separators are one byte.
+        Some(unsafe {
+            self.path
+                .get_unchecked(self.tags.first()?.0..(self.tags.last()?.1 + 1))
+        })
+    }
+
     fn slice(&self, x: SliceIndices) -> &str {
         // This is safe when used with already verified slfile: s
         // from the same instance.
@@ -108,6 +119,20 @@ mod tests {
     fn tags_returns_all_tags(raw_file: RawTaggedFile) {
         let file = TaggedFile::new(raw_file.to_string()).unwrap();
         prop_assert_eq!(file.tags().collect::<Vec<_>>(), raw_file.tags);
+    }
+
+    #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    fn tags_str_returns_string_of_all_tags_with_separators(raw_file: RawTaggedFile) {
+        prop_assume!(!raw_file.tags.is_empty());
+        let file = TaggedFile::new(raw_file.to_string()).unwrap();
+        let path = raw_file.to_string();
+        prop_assert_eq!(
+            file.tags_str().unwrap(),
+            path.strip_suffix(&raw_file.name)
+                .unwrap()
+                .strip_suffix(TAG_END)
+                .unwrap()
+        );
     }
 
     #[derive(Clone, Debug)]
