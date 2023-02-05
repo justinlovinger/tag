@@ -81,7 +81,10 @@ mod tests {
     fn new_tagged_file_returns_none_for_non_tagged_files(s: String) {
         prop_assume!(
             !(s.starts_with(TAG_END)
-                || SEPARATORS.map(|c| format!("{}{}", c, TAG_END)).contains(&s))
+                || SEPARATORS
+                    .map(|c| format!("{}{}", c, TAG_END))
+                    .iter()
+                    .any(|ended_sep| s.contains(ended_sep)))
         );
         prop_assert!(TaggedFile::new(s).is_none());
     }
