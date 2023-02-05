@@ -151,11 +151,8 @@ mod tests {
     lazy_static! {
         static ref SEPARATORS_STRING: String = SEPARATORS.iter().collect();
         static ref SEPARATORS_AND_ENDS: String = format!("{}{}", *SEPARATORS_STRING, TAG_END);
-        static ref TAG_REGEX: String = format!(
-            "[^{sae}]([^{s}]*[^{sae}])?",
-            sae = *SEPARATORS_AND_ENDS,
-            s = *SEPARATORS_STRING
-        );
+        static ref TAG_REGEX: String =
+            format!("[^{}][^{}]*", *SEPARATORS_AND_ENDS, *SEPARATORS_STRING);
         static ref SEPARATOR_REGEX: String = format!("[{}]", SEPARATORS_STRING.deref());
     }
 }
