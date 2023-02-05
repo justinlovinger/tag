@@ -1,3 +1,10 @@
+mod tag;
 mod tagged_file;
 
-pub use tagged_file::TaggedFile;
+#[cfg(test)]
+mod testing;
+
+pub use crate::{tag::Tag, tagged_file::TaggedFile};
+
+const SEPARATORS: [char; 2] = ['-', '/'];
+const TAG_END: char = '_';

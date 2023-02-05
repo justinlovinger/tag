@@ -1,5 +1,4 @@
-const SEPARATORS: [char; 2] = ['-', '/'];
-const TAG_END: char = '_';
+use crate::{SEPARATORS, TAG_END};
 
 #[derive(Clone, Debug)]
 pub struct TaggedFile {
@@ -75,21 +74,23 @@ mod tests {
     };
     use test_strategy::proptest;
 
+    use crate::testing::*;
+
     use super::*;
 
     #[test]
-    fn new_tagged_file_returns_some_for_simple_tagged_files() {
+    fn new_returns_some_for_simple_tagged_files() {
         assert!(TaggedFile::new("foo-bar-_baz".to_owned()).is_some());
         assert!(TaggedFile::new("foo/bar/_baz".to_owned()).is_some());
     }
 
     #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
-    fn new_tagged_file_returns_some_for_tagged_files(raw_file: RawTaggedFile) {
-        assert!(TaggedFile::new(raw_file.to_string()).is_some());
+    fn new_returns_some_for_tagged_files(raw_file: RawTaggedFile) {
+        prop_assert!(TaggedFile::new(raw_file.to_string()).is_some());
     }
 
     #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
-    fn new_tagged_file_returns_none_for_non_tagged_files(s: String) {
+    fn new_returns_none_for_non_tagged_files(s: String) {
         prop_assume!(
             !(s.starts_with(TAG_END)
                 || SEPARATORS
@@ -101,7 +102,7 @@ mod tests {
     }
 
     #[test]
-    fn new_tagged_file_returns_none_for_files_with_empty_tags() {
+    fn new_returns_none_for_files_with_empty_tags() {
         assert!(TaggedFile::new("-bar-_baz".to_owned()).is_none());
         assert!(TaggedFile::new("foo--_baz".to_owned()).is_none());
         assert!(TaggedFile::new("/bar-_baz".to_owned()).is_none());
@@ -177,10 +178,6 @@ mod tests {
     }
 
     lazy_static! {
-        static ref SEPARATORS_STRING: String = SEPARATORS.iter().collect();
-        static ref SEPARATORS_AND_ENDS: String = format!("{}{}", *SEPARATORS_STRING, TAG_END);
-        static ref TAG_REGEX: String =
-            format!("[^{}][^{}]*", *SEPARATORS_AND_ENDS, *SEPARATORS_STRING);
         static ref SEPARATOR_REGEX: String = format!("[{}]", SEPARATORS_STRING.deref());
     }
 }
