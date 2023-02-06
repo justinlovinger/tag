@@ -1,6 +1,8 @@
+use derive_more::Display;
+
 use crate::{SEPARATORS, TAG_END};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Display, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Tag(String);
 
 impl Tag {
