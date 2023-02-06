@@ -1,4 +1,7 @@
+use std::{borrow::Borrow, cmp::Ordering};
+
 use derive_more::Display;
+use ref_cast::{ref_cast_custom, RefCastCustom};
 
 use crate::{SEPARATORS, TAG_END};
 
@@ -12,6 +15,51 @@ impl Tag {
         } else {
             Some(Tag(s))
         }
+    }
+}
+
+#[derive(Debug, Display, PartialEq, Eq, PartialOrd, Ord, RefCastCustom)]
+#[repr(transparent)]
+pub struct TagRef(str);
+
+impl TagRef {
+    #[ref_cast_custom]
+    pub(crate) const fn new(s: &str) -> &Self;
+}
+
+impl PartialOrd<&TagRef> for Tag {
+    fn partial_cmp(&self, other: &&TagRef) -> Option<Ordering> {
+        self.as_ref().partial_cmp(other)
+    }
+}
+
+impl PartialOrd<Tag> for &TagRef {
+    fn partial_cmp(&self, other: &Tag) -> Option<Ordering> {
+        self.partial_cmp(&other.as_ref())
+    }
+}
+
+impl PartialEq<&TagRef> for Tag {
+    fn eq(&self, other: &&TagRef) -> bool {
+        self.as_ref().eq(other)
+    }
+}
+
+impl PartialEq<Tag> for &TagRef {
+    fn eq(&self, other: &Tag) -> bool {
+        self.eq(&other.as_ref())
+    }
+}
+
+impl AsRef<TagRef> for Tag {
+    fn as_ref(&self) -> &TagRef {
+        self.borrow()
+    }
+}
+
+impl Borrow<TagRef> for Tag {
+    fn borrow(&self) -> &TagRef {
+        TagRef::new(self.0.as_str())
     }
 }
 

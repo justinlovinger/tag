@@ -1,4 +1,4 @@
-use crate::{SEPARATORS, TAG_END};
+use crate::{TagRef, SEPARATORS, TAG_END};
 
 #[derive(Clone, Debug)]
 pub struct TaggedFile {
@@ -41,8 +41,11 @@ impl TaggedFile {
         self.slice(self.name)
     }
 
-    pub fn tags(&self) -> impl Iterator<Item = &str> {
-        self.tags.iter().copied().map(|x| self.slice(x))
+    pub fn tags(&self) -> impl Iterator<Item = &TagRef> {
+        self.tags
+            .iter()
+            .copied()
+            .map(|x| TagRef::new(self.slice(x)))
     }
 
     pub fn tags_str(&self) -> Option<&str> {
@@ -74,7 +77,7 @@ mod tests {
     };
     use test_strategy::proptest;
 
-    use crate::testing::*;
+    use crate::{testing::*, Tag};
 
     use super::*;
 
@@ -139,7 +142,7 @@ mod tests {
     #[derive(Clone, Debug)]
     struct RawTaggedFile {
         name: String,
-        tags: Vec<String>,
+        tags: Vec<Tag>,
         seps: Vec<char>,
     }
 
@@ -163,7 +166,8 @@ mod tests {
                 r"\PC*",
                 (0_usize..16).prop_flat_map(|len| {
                     (
-                        vec(TAG_REGEX.as_str(), len),
+                        vec(TAG_REGEX.as_str(), len)
+                            .prop_map(|xs| xs.into_iter().map(|s| Tag::new(s).unwrap()).collect()),
                         vec(SEPARATOR_REGEX.as_str(), len).prop_map(|xs| {
                             xs.into_iter()
                                 .map(|s| s.chars().next().expect("at least one character"))
