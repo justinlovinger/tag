@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::{Tag, TagRef, INLINE_SEPARATOR, SEPARATORS, TAG_END};
 
 #[derive(Clone, Debug)]
@@ -74,6 +76,12 @@ impl TaggedFile {
         // This is safe when used with already verified slfile: s
         // from the same instance.
         unsafe { self.path.get_unchecked(x.0..x.1) }
+    }
+}
+
+impl fmt::Display for TaggedFile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.path.fmt(f)
     }
 }
 
