@@ -1,4 +1,4 @@
-use crate::{TagRef, SEPARATORS, TAG_END};
+use crate::{Tag, TagRef, INLINE_SEPARATOR, SEPARATORS, TAG_END};
 
 #[derive(Clone, Debug)]
 pub struct TaggedFile {
@@ -35,6 +35,17 @@ impl TaggedFile {
             }
         }
         None
+    }
+
+    pub fn add(&self, tag: Tag) -> String {
+        format!(
+            "{}{}{}{}{}",
+            self.tags_str().unwrap_or(""),
+            tag,
+            INLINE_SEPARATOR,
+            TAG_END,
+            self.name()
+        )
     }
 
     pub fn name(&self) -> &str {
@@ -111,6 +122,22 @@ mod tests {
         assert!(TaggedFile::new("/bar-_baz".to_owned()).is_none());
         assert!(TaggedFile::new("foo/-_baz".to_owned()).is_none());
         assert!(TaggedFile::new("foo-/_baz".to_owned()).is_none());
+    }
+
+    #[test]
+    fn add_returns_path_with_tag_added() {
+        assert_eq!(
+            TaggedFile::new("foo-_bar".to_owned())
+                .unwrap()
+                .add(Tag::new("baz".to_owned()).unwrap()),
+            "foo-baz-_bar"
+        );
+        assert_eq!(
+            TaggedFile::new("foo/_bar".to_owned())
+                .unwrap()
+                .add(Tag::new("baz".to_owned()).unwrap()),
+            "foo/baz-_bar"
+        );
     }
 
     #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
