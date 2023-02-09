@@ -9,5 +9,5 @@ pub use crate::{
     tagged_file::TaggedFile,
 };
 
-const SEPARATORS: [char; 2] = ['-', '/'];
-const TAG_END: char = '_';
+pub const SEPARATORS: [char; 2] = ['-', '/'];
+pub const TAG_END: char = '_';
