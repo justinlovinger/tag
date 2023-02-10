@@ -39,18 +39,23 @@ impl TaggedFile {
         None
     }
 
-    pub fn add<T>(&self, tag: T) -> String
+    pub fn add<T>(&self, tag: T) -> Option<String>
     where
         T: AsRef<TagRef>,
     {
-        format!(
-            "{}{}{}{}{}",
-            self.tags_str().unwrap_or(""),
-            tag.as_ref(),
-            INLINE_SEPARATOR,
-            TAG_END,
-            self.name()
-        )
+        let tag = tag.as_ref();
+        if self.tags().any(|x| x == tag) {
+            None
+        } else {
+            Some(format!(
+                "{}{}{}{}{}",
+                self.tags_str().unwrap_or(""),
+                tag,
+                INLINE_SEPARATOR,
+                TAG_END,
+                self.name()
+            ))
+        }
     }
 
     pub fn name(&self) -> &str {
@@ -147,13 +152,23 @@ mod tests {
             TaggedFile::new("foo-_bar".to_owned())
                 .unwrap()
                 .add(Tag::new("baz".to_owned()).unwrap()),
-            "foo-baz-_bar"
+            Some("foo-baz-_bar".to_owned())
         );
         assert_eq!(
             TaggedFile::new("foo/_bar".to_owned())
                 .unwrap()
                 .add(Tag::new("baz".to_owned()).unwrap()),
-            "foo/baz-_bar"
+            Some("foo/baz-_bar".to_owned())
+        );
+    }
+
+    #[test]
+    fn add_returns_none_if_file_already_has_tag() {
+        assert_eq!(
+            TaggedFile::new("foo-_bar".to_owned())
+                .unwrap()
+                .add(Tag::new("foo".to_owned()).unwrap()),
+            None
         );
     }
 

@@ -43,9 +43,15 @@ fn main() {
 
     if let Some(Commands::Add { tag, files }) = args.command {
         for file in files {
-            #[allow(clippy::needless_borrow)] // False negative
-            if let Err(e) = rename(&file, file.add(&tag)) {
-                println!("Error: \"{}\", while adding `{}` to `{}`", e, tag, file);
+            match file.add(&tag) {
+                Some(to) => {
+                    if let Err(e) = rename(&file, to) {
+                        println!("Error: \"{}\", while adding `{}` to `{}`", e, tag, file);
+                    }
+                }
+                None => {
+                    println!("Error: `{}` already has `{}`", file, tag);
+                }
             }
         }
     }
