@@ -1,6 +1,6 @@
-use std::fmt;
+use std::{fmt, path::Path};
 
-use crate::{Tag, TagRef, INLINE_SEPARATOR, SEPARATORS, TAG_END};
+use crate::{TagRef, INLINE_SEPARATOR, SEPARATORS, TAG_END};
 
 #[derive(Clone, Debug)]
 pub struct TaggedFile {
@@ -39,11 +39,14 @@ impl TaggedFile {
         None
     }
 
-    pub fn add(&self, tag: Tag) -> String {
+    pub fn add<T>(&self, tag: T) -> String
+    where
+        T: AsRef<TagRef>,
+    {
         format!(
             "{}{}{}{}{}",
             self.tags_str().unwrap_or(""),
-            tag,
+            tag.as_ref(),
             INLINE_SEPARATOR,
             TAG_END,
             self.name()
@@ -82,6 +85,12 @@ impl TaggedFile {
 impl fmt::Display for TaggedFile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.path.fmt(f)
+    }
+}
+
+impl AsRef<Path> for TaggedFile {
+    fn as_ref(&self) -> &Path {
+        self.path.as_ref()
     }
 }
 

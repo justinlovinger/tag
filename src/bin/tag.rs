@@ -1,3 +1,5 @@
+use std::{fs::rename, io};
+
 use clap::{Parser, Subcommand};
 use tag::{Tag, TaggedFile, SEPARATORS, TAG_END};
 
@@ -36,10 +38,16 @@ fn tagged_file_parser(s: &str) -> Result<TaggedFile, String> {
     ))
 }
 
-fn main() {
+fn main() -> io::Result<()> {
     let args = Args::parse();
 
     if let Some(Commands::Add { tag, files }) = args.command {
-        println!("Add {} to {:?}", tag, files);
+        for file in files {
+            #[allow(clippy::needless_borrow)] // False negative
+            let to = file.add(&tag);
+            rename(file, to)?;
+        }
     }
+
+    Ok(())
 }
