@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, cmp::Ordering};
+use std::{borrow::Borrow, cmp::Ordering, ops::Deref};
 
 use derive_more::Display;
 use ref_cast::{ref_cast_custom, RefCastCustom};
@@ -48,6 +48,14 @@ impl PartialEq<&TagRef> for Tag {
 impl PartialEq<Tag> for &TagRef {
     fn eq(&self, other: &Tag) -> bool {
         self.eq(&other.as_ref())
+    }
+}
+
+impl Deref for Tag {
+    type Target = TagRef;
+
+    fn deref(&self) -> &Self::Target {
+        self.borrow()
     }
 }
 
