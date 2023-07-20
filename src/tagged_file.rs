@@ -1,4 +1,7 @@
-use std::{fmt, path::Path};
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+};
 
 use crate::{TagRef, INLINE_SEPARATOR, SEPARATORS, TAG_END};
 
@@ -93,8 +96,20 @@ impl fmt::Display for TaggedFile {
     }
 }
 
+impl From<TaggedFile> for PathBuf {
+    fn from(value: TaggedFile) -> Self {
+        value.path.into()
+    }
+}
+
 impl AsRef<Path> for TaggedFile {
     fn as_ref(&self) -> &Path {
+        self.path.as_ref()
+    }
+}
+
+impl AsRef<str> for TaggedFile {
+    fn as_ref(&self) -> &str {
         self.path.as_ref()
     }
 }

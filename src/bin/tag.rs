@@ -1,7 +1,6 @@
-use std::fs::rename;
-
 use clap::{Parser, Subcommand};
-use tag::{Tag, TaggedFile, SEPARATORS, TAG_END};
+use filesystem::OsFileSystem;
+use tag::{Tag, TaggedFile, TaggedFilesystem, SEPARATORS, TAG_END};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -38,21 +37,19 @@ fn tagged_file_parser(s: &str) -> Result<TaggedFile, String> {
     ))
 }
 
-fn main() {
+fn main() -> std::io::Result<()> {
     let args = Args::parse();
 
+    let filesystem = TaggedFilesystem::new(OsFileSystem::new());
     if let Some(Commands::Add { tag, files }) = args.command {
         for file in files {
-            match file.add(&tag) {
-                Some(to) => {
-                    if let Err(e) = rename(&file, to) {
-                        println!("Error: \"{}\", while adding `{}` to `{}`", e, tag, file);
-                    }
-                }
-                None => {
-                    println!("Error: `{}` already has `{}`", file, tag);
-                }
+            match filesystem.add(&tag, &file) {
+                Ok(_) => {}
+                Err(tag::AddError::FilesystemError(e)) => return Err(e),
+                Err(tag::AddError::FileAlreadyHasTag(e)) => println!("{e}"),
             }
         }
     }
+
+    Ok(())
 }

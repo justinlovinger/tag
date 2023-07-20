@@ -8,7 +8,9 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.1.4", features = ["derive"] }
 derive_more = "0.99.17"
+filesystem = "0.4.4"
 ref-cast = "1.0.14"
+thiserror = "1.0.43"
 
 [dev-dependencies]
 lazy_static = "1.4.0"
