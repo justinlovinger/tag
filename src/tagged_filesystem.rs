@@ -19,6 +19,12 @@ pub enum AddError<T> {
 #[error("`{0}` already has `{1}`")]
 pub struct FileAlreadyHasTagError<T>(TaggedFile, T);
 
+impl<T> From<std::io::Error> for AddError<T> {
+    fn from(value: std::io::Error) -> Self {
+        Self::FilesystemError(value)
+    }
+}
+
 impl<F> TaggedFilesystem<F>
 where
     F: FileSystem,
@@ -32,10 +38,7 @@ where
         T: AsRef<TagRef>,
     {
         match file.add(&tag) {
-            Some(to) => self
-                .fs
-                .rename(file, to)
-                .map_err(|e| AddError::FilesystemError(e)),
+            Some(to) => Ok(self.fs.rename(file, to)?),
             None => Err(AddError::FileAlreadyHasTag(FileAlreadyHasTagError(
                 file.clone(),
                 tag,
