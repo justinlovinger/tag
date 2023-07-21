@@ -1,6 +1,6 @@
 use filesystem::FileSystem;
 
-use crate::{TagRef, TaggedFile};
+use crate::{tagged_file::FileAlreadyHasTagError, TagRef, TaggedFile};
 
 #[derive(Debug)]
 pub struct TaggedFilesystem<F> {
@@ -9,20 +9,8 @@ pub struct TaggedFilesystem<F> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum AddError<T> {
-    #[error("{0}")]
-    FileAlreadyHasTag(FileAlreadyHasTagError<T>),
-    #[error("{0}")]
-    FilesystemError(std::io::Error),
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("`{0}` already has `{1}`")]
-pub struct FileAlreadyHasTagError<T>(TaggedFile, T);
-
-impl<T> From<std::io::Error> for AddError<T> {
-    fn from(value: std::io::Error) -> Self {
-        Self::FilesystemError(value)
-    }
+    FileAlreadyHasTag(#[from] FileAlreadyHasTagError<T>),
+    FilesystemError(#[from] std::io::Error),
 }
 
 impl<F> TaggedFilesystem<F>
@@ -37,13 +25,8 @@ where
     where
         T: AsRef<TagRef>,
     {
-        match file.add(&tag) {
-            Some(to) => Ok(self.fs.rename(file, to)?),
-            None => Err(AddError::FileAlreadyHasTag(FileAlreadyHasTagError(
-                file.clone(),
-                tag,
-            ))),
-        }
+        let to = file.add(tag)?;
+        Ok(self.fs.rename(file, to)?)
     }
 }
 

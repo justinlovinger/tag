@@ -12,8 +12,20 @@ pub struct TaggedFile {
     tags: Vec<SliceIndices>,
 }
 
+impl PartialEq for TaggedFile {
+    fn eq(&self, other: &Self) -> bool {
+        // If `path` is equal,
+        // `name` and `tags` should be too.
+        self.path.eq(&other.path)
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct SliceIndices(usize, usize);
+
+#[derive(Debug, PartialEq, thiserror::Error)]
+#[error("`{0}` already has `{1}`")]
+pub struct FileAlreadyHasTagError<T>(TaggedFile, T);
 
 impl TaggedFile {
     pub fn new(path: String) -> Option<TaggedFile> {
@@ -42,18 +54,17 @@ impl TaggedFile {
         None
     }
 
-    pub fn add<T>(&self, tag: T) -> Option<String>
+    pub fn add<T>(&self, tag: T) -> Result<String, FileAlreadyHasTagError<T>>
     where
         T: AsRef<TagRef>,
     {
-        let tag = tag.as_ref();
-        if self.tags().any(|x| x == tag) {
-            None
+        if self.tags().any(|x| x == tag.as_ref()) {
+            Err(FileAlreadyHasTagError(self.clone(), tag))
         } else {
-            Some(format!(
+            Ok(format!(
                 "{}{}{}{}{}",
                 self.tags_str().unwrap_or(""),
-                tag,
+                tag.as_ref(),
                 INLINE_SEPARATOR,
                 TAG_END,
                 self.name()
@@ -167,24 +178,22 @@ mod tests {
             TaggedFile::new("foo-_bar".to_owned())
                 .unwrap()
                 .add(Tag::new("baz".to_owned()).unwrap()),
-            Some("foo-baz-_bar".to_owned())
+            Ok("foo-baz-_bar".to_owned())
         );
         assert_eq!(
             TaggedFile::new("foo/_bar".to_owned())
                 .unwrap()
                 .add(Tag::new("baz".to_owned()).unwrap()),
-            Some("foo/baz-_bar".to_owned())
+            Ok("foo/baz-_bar".to_owned())
         );
     }
 
     #[test]
     fn add_returns_none_if_file_already_has_tag() {
-        assert_eq!(
-            TaggedFile::new("foo-_bar".to_owned())
-                .unwrap()
-                .add(Tag::new("foo".to_owned()).unwrap()),
-            None
-        );
+        assert!(TaggedFile::new("foo-_bar".to_owned())
+            .unwrap()
+            .add(Tag::new("foo".to_owned()).unwrap())
+            .is_err(),);
     }
 
     #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
