@@ -8,7 +8,13 @@ use crate::{TagRef, INLINE_SEPARATOR, SEPARATORS, TAG_END};
 #[derive(Clone, Debug)]
 pub struct TaggedFile {
     path: String,
+    /// Slice indices to get name from `path`,
+    /// start inclusive
+    /// and end exclusive.
     name: SliceIndices,
+    /// Slice indices to get tags from `path`,
+    /// start inclusive
+    /// and end exclusive.
     tags: Vec<SliceIndices>,
 }
 
@@ -25,7 +31,11 @@ struct SliceIndices(usize, usize);
 
 #[derive(Debug, PartialEq, thiserror::Error)]
 #[error("`{0}` already has `{1}`")]
-pub struct FileAlreadyHasTagError<T>(TaggedFile, T);
+pub struct HasTagError<T>(TaggedFile, T);
+
+#[derive(Debug, PartialEq, thiserror::Error)]
+#[error("`{0}` lacks `{1}`")]
+pub struct LacksTagError<T>(TaggedFile, T);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MoveInstruction {
@@ -82,18 +92,12 @@ impl TaggedFile {
         })
     }
 
-    fn slice(&self, x: SliceIndices) -> &str {
-        // This is safe when used with already verified slices
-        // from the same instance.
-        unsafe { self.path.get_unchecked(x.0..x.1) }
-    }
-
-    pub fn add_tag<T>(self, tag: T) -> Result<MoveInstruction, FileAlreadyHasTagError<T>>
+    pub fn add_tag<T>(self, tag: T) -> Result<MoveInstruction, HasTagError<T>>
     where
         T: AsRef<TagRef>,
     {
         if self.tags().any(|x| x == tag.as_ref()) {
-            Err(FileAlreadyHasTagError(self, tag))
+            Err(HasTagError(self, tag))
         } else {
             Ok(MoveInstruction {
                 to: format!(
@@ -108,6 +112,44 @@ impl TaggedFile {
                 from: self.into(),
             })
         }
+    }
+
+    pub fn del_tag<T>(self, tag: T) -> Result<MoveInstruction, LacksTagError<T>>
+    where
+        T: AsRef<TagRef>,
+    {
+        let i = self.tags().zip(self.tags.iter()).find_map(|(tag_, i)| {
+            if tag_ == tag.as_ref() {
+                Some(i)
+            } else {
+                None
+            }
+        });
+        match i {
+            Some(i) => {
+                Ok(MoveInstruction {
+                    to: format!(
+                        "{}{}",
+                        // This is safe
+                        // because we know `i.0` is the start of a character
+                        unsafe { self.path.get_unchecked(..i.0) },
+                        // This is safe
+                        // because `i.1` is always a separator
+                        // and every separator is one byte.
+                        unsafe { self.path.get_unchecked(i.1 + 1..) },
+                    )
+                    .into(),
+                    from: self.into(),
+                })
+            }
+            None => Err(LacksTagError(self, tag)),
+        }
+    }
+
+    fn slice(&self, x: SliceIndices) -> &str {
+        // This is safe when used with already verified slices
+        // from the same instance.
+        unsafe { self.path.get_unchecked(x.0..x.1) }
     }
 }
 
@@ -210,31 +252,56 @@ mod tests {
 
     #[test]
     fn add_tag_returns_path_with_tag_added() {
+        test_add_tag("foo-_bar", "baz", "foo-baz-_bar");
+        test_add_tag("foo/_bar", "baz", "foo/baz-_bar");
+    }
+
+    fn test_add_tag(file: &str, tag: &str, expected_to: &str) {
         assert_eq!(
-            TaggedFile::new("foo-_bar".to_owned())
+            TaggedFile::new(file.to_owned())
                 .unwrap()
-                .add_tag(Tag::new("baz".to_owned()).unwrap()),
+                .add_tag(Tag::new(tag.to_owned()).unwrap()),
             Ok(MoveInstruction {
-                from: "foo-_bar".into(),
-                to: "foo-baz-_bar".into()
-            })
-        );
-        assert_eq!(
-            TaggedFile::new("foo/_bar".to_owned())
-                .unwrap()
-                .add_tag(Tag::new("baz".to_owned()).unwrap()),
-            Ok(MoveInstruction {
-                from: "foo/_bar".into(),
-                to: "foo/baz-_bar".into()
+                from: file.into(),
+                to: expected_to.into()
             })
         );
     }
 
     #[test]
-    fn add_tag_returns_none_if_file_already_has_tag() {
+    fn add_tag_returns_err_if_file_already_has_tag() {
         assert!(TaggedFile::new("foo-_bar".to_owned())
             .unwrap()
             .add_tag(Tag::new("foo".to_owned()).unwrap())
+            .is_err());
+    }
+
+    #[test]
+    fn del_tag_returns_path_with_tag_removed() {
+        test_del_tag("foo-_bar", "foo", "_bar");
+        test_del_tag("foo/_bar", "foo", "_bar");
+        test_del_tag("foo/baz-_bar", "foo", "baz-_bar");
+        test_del_tag("foo-baz/_bar", "baz", "foo-_bar");
+        test_del_tag("foo/baz/_bar", "baz", "foo/_bar");
+    }
+
+    fn test_del_tag(file: &str, tag: &str, expected_to: &str) {
+        assert_eq!(
+            TaggedFile::new(file.to_owned())
+                .unwrap()
+                .del_tag(Tag::new(tag.to_owned()).unwrap()),
+            Ok(MoveInstruction {
+                from: file.into(),
+                to: expected_to.into()
+            })
+        );
+    }
+
+    #[test]
+    fn del_tag_returns_err_if_file_lacks_tag() {
+        assert!(TaggedFile::new("foo-_bar".to_owned())
+            .unwrap()
+            .del_tag(Tag::new("baz".to_owned()).unwrap())
             .is_err());
     }
 

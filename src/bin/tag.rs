@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use filesystem::OsFileSystem;
-use tag::{Tag, TaggedFile, TaggedFilesystem, SEPARATORS, TAG_END};
+use tag::{AddError, DelError, Tag, TaggedFile, TaggedFilesystem, SEPARATORS, TAG_END};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -18,6 +18,16 @@ enum Commands {
         tag: Tag,
 
         /// Files to tag
+        #[clap(required = true, value_name = "FILE", value_parser = tagged_file_parser)]
+        files: Vec<TaggedFile>,
+    },
+    /// Delete tags from files
+    Del {
+        /// Tag to delete
+        #[clap(required = true, value_name = "TAG", value_parser = tag_parser)]
+        tag: Tag,
+
+        /// Files to delete tag from
         #[clap(required = true, value_name = "FILE", value_parser = tagged_file_parser)]
         files: Vec<TaggedFile>,
     },
@@ -41,14 +51,26 @@ fn main() -> std::io::Result<()> {
     let args = Args::parse();
 
     let filesystem = TaggedFilesystem::new(OsFileSystem::new());
-    if let Some(Commands::Add { tag, files }) = args.command {
-        for file in files {
-            match filesystem.add_tag(&tag, file) {
-                Ok(_) => {}
-                Err(tag::AddError::FilesystemError(e)) => return Err(e),
-                Err(tag::AddError::FileAlreadyHasTag(e)) => println!("{e}"),
+    match args.command {
+        Some(Commands::Add { tag, files }) => {
+            for file in files {
+                match filesystem.add_tag(&tag, file) {
+                    Ok(_) => {}
+                    Err(AddError::FilesystemError(e)) => return Err(e),
+                    Err(AddError::HasTagError(e)) => println!("{e}"),
+                }
             }
         }
+        Some(Commands::Del { tag, files }) => {
+            for file in files {
+                match filesystem.del_tag(&tag, file) {
+                    Ok(_) => {}
+                    Err(DelError::FilesystemError(e)) => return Err(e),
+                    Err(DelError::LacksTagError(e)) => println!("{e}"),
+                }
+            }
+        }
+        None => (),
     }
 
     Ok(())
