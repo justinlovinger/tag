@@ -95,7 +95,7 @@ impl TaggedFile {
     }
 
     fn slice(&self, x: SliceIndices) -> &str {
-        // This is safe when used with already verified slfile: s
+        // This is safe when used with already verified slices
         // from the same instance.
         unsafe { self.path.get_unchecked(x.0..x.1) }
     }
