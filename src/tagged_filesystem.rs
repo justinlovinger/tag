@@ -34,7 +34,7 @@ where
     where
         T: AsRef<TagRef>,
     {
-        let MoveInstruction { from, to } = file.add_tag(tag)?;
+        let MoveInstruction { from, to } = file.add_inline_tag(tag)?;
         Ok(self.fs.rename(from, to)?)
     }
 

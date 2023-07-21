@@ -92,7 +92,7 @@ impl TaggedFile {
         })
     }
 
-    pub fn add_tag<T>(self, tag: T) -> Result<MoveInstruction, HasTagError<T>>
+    pub fn add_inline_tag<T>(self, tag: T) -> Result<MoveInstruction, HasTagError<T>>
     where
         T: AsRef<TagRef>,
     {
@@ -251,16 +251,16 @@ mod tests {
     }
 
     #[test]
-    fn add_tag_returns_path_with_tag_added() {
-        test_add_tag("foo-_bar", "baz", "foo-baz-_bar");
-        test_add_tag("foo/_bar", "baz", "foo/baz-_bar");
+    fn add_inline_tag_returns_path_with_tag_added() {
+        test_add_inline_tag("foo-_bar", "baz", "foo-baz-_bar");
+        test_add_inline_tag("foo/_bar", "baz", "foo/baz-_bar");
     }
 
-    fn test_add_tag(file: &str, tag: &str, expected_to: &str) {
+    fn test_add_inline_tag(file: &str, tag: &str, expected_to: &str) {
         assert_eq!(
             TaggedFile::new(file.to_owned())
                 .unwrap()
-                .add_tag(Tag::new(tag.to_owned()).unwrap()),
+                .add_inline_tag(Tag::new(tag.to_owned()).unwrap()),
             Ok(MoveInstruction {
                 from: file.into(),
                 to: expected_to.into()
@@ -269,10 +269,10 @@ mod tests {
     }
 
     #[test]
-    fn add_tag_returns_err_if_file_already_has_tag() {
+    fn add_inline_tag_returns_err_if_file_already_has_tag() {
         assert!(TaggedFile::new("foo-_bar".to_owned())
             .unwrap()
-            .add_tag(Tag::new("foo".to_owned()).unwrap())
+            .add_inline_tag(Tag::new("foo".to_owned()).unwrap())
             .is_err());
     }
 
