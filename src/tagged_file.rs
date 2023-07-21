@@ -60,28 +60,6 @@ impl TaggedFile {
         None
     }
 
-    pub fn add_tag<T>(self, tag: T) -> Result<MoveInstruction, FileAlreadyHasTagError<T>>
-    where
-        T: AsRef<TagRef>,
-    {
-        if self.tags().any(|x| x == tag.as_ref()) {
-            Err(FileAlreadyHasTagError(self, tag))
-        } else {
-            Ok(MoveInstruction {
-                to: format!(
-                    "{}{}{}{}{}",
-                    self.tags_str().unwrap_or(""),
-                    tag.as_ref(),
-                    INLINE_SEPARATOR,
-                    TAG_END,
-                    self.name()
-                )
-                .into(),
-                from: self.into(),
-            })
-        }
-    }
-
     pub fn name(&self) -> &str {
         self.slice(self.name)
     }
@@ -108,6 +86,28 @@ impl TaggedFile {
         // This is safe when used with already verified slices
         // from the same instance.
         unsafe { self.path.get_unchecked(x.0..x.1) }
+    }
+
+    pub fn add_tag<T>(self, tag: T) -> Result<MoveInstruction, FileAlreadyHasTagError<T>>
+    where
+        T: AsRef<TagRef>,
+    {
+        if self.tags().any(|x| x == tag.as_ref()) {
+            Err(FileAlreadyHasTagError(self, tag))
+        } else {
+            Ok(MoveInstruction {
+                to: format!(
+                    "{}{}{}{}{}",
+                    self.tags_str().unwrap_or(""),
+                    tag.as_ref(),
+                    INLINE_SEPARATOR,
+                    TAG_END,
+                    self.name()
+                )
+                .into(),
+                from: self.into(),
+            })
+        }
     }
 }
 
@@ -182,6 +182,32 @@ mod tests {
         assert!(TaggedFile::new("foo-/_baz".to_owned()).is_none());
     }
 
+    #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    fn name_returns_name(raw_file: RawTaggedFile) {
+        let file = TaggedFile::new(raw_file.to_string()).unwrap();
+        prop_assert_eq!(file.name(), raw_file.name);
+    }
+
+    #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    fn tags_returns_all_tags(raw_file: RawTaggedFile) {
+        let file = TaggedFile::new(raw_file.to_string()).unwrap();
+        prop_assert_eq!(file.tags().collect::<Vec<_>>(), raw_file.tags);
+    }
+
+    #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    fn tags_str_returns_string_of_all_tags_with_separators(raw_file: RawTaggedFile) {
+        prop_assume!(!raw_file.tags.is_empty());
+        let file = TaggedFile::new(raw_file.to_string()).unwrap();
+        let path = raw_file.to_string();
+        prop_assert_eq!(
+            file.tags_str().unwrap(),
+            path.strip_suffix(&raw_file.name)
+                .unwrap()
+                .strip_suffix(TAG_END)
+                .unwrap()
+        );
+    }
+
     #[test]
     fn add_tag_returns_path_with_tag_added() {
         assert_eq!(
@@ -209,33 +235,7 @@ mod tests {
         assert!(TaggedFile::new("foo-_bar".to_owned())
             .unwrap()
             .add_tag(Tag::new("foo".to_owned()).unwrap())
-            .is_err(),);
-    }
-
-    #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
-    fn name_returns_name(raw_file: RawTaggedFile) {
-        let file = TaggedFile::new(raw_file.to_string()).unwrap();
-        prop_assert_eq!(file.name(), raw_file.name);
-    }
-
-    #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
-    fn tags_returns_all_tags(raw_file: RawTaggedFile) {
-        let file = TaggedFile::new(raw_file.to_string()).unwrap();
-        prop_assert_eq!(file.tags().collect::<Vec<_>>(), raw_file.tags);
-    }
-
-    #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
-    fn tags_str_returns_string_of_all_tags_with_separators(raw_file: RawTaggedFile) {
-        prop_assume!(!raw_file.tags.is_empty());
-        let file = TaggedFile::new(raw_file.to_string()).unwrap();
-        let path = raw_file.to_string();
-        prop_assert_eq!(
-            file.tags_str().unwrap(),
-            path.strip_suffix(&raw_file.name)
-                .unwrap()
-                .strip_suffix(TAG_END)
-                .unwrap()
-        );
+            .is_err());
     }
 
     #[derive(Clone, Debug)]
