@@ -43,7 +43,7 @@ fn main() -> std::io::Result<()> {
     let filesystem = TaggedFilesystem::new(OsFileSystem::new());
     if let Some(Commands::Add { tag, files }) = args.command {
         for file in files {
-            match filesystem.add(&tag, &file) {
+            match filesystem.add_tag(&tag, file) {
                 Ok(_) => {}
                 Err(tag::AddError::FilesystemError(e)) => return Err(e),
                 Err(tag::AddError::FileAlreadyHasTag(e)) => println!("{e}"),

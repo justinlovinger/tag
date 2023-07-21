@@ -27,6 +27,12 @@ struct SliceIndices(usize, usize);
 #[error("`{0}` already has `{1}`")]
 pub struct FileAlreadyHasTagError<T>(TaggedFile, T);
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct MoveInstruction {
+    pub from: PathBuf,
+    pub to: PathBuf,
+}
+
 impl TaggedFile {
     pub fn new(path: String) -> Option<TaggedFile> {
         let mut tags = Vec::new();
@@ -54,21 +60,25 @@ impl TaggedFile {
         None
     }
 
-    pub fn add<T>(&self, tag: T) -> Result<String, FileAlreadyHasTagError<T>>
+    pub fn add_tag<T>(self, tag: T) -> Result<MoveInstruction, FileAlreadyHasTagError<T>>
     where
         T: AsRef<TagRef>,
     {
         if self.tags().any(|x| x == tag.as_ref()) {
-            Err(FileAlreadyHasTagError(self.clone(), tag))
+            Err(FileAlreadyHasTagError(self, tag))
         } else {
-            Ok(format!(
-                "{}{}{}{}{}",
-                self.tags_str().unwrap_or(""),
-                tag.as_ref(),
-                INLINE_SEPARATOR,
-                TAG_END,
-                self.name()
-            ))
+            Ok(MoveInstruction {
+                to: format!(
+                    "{}{}{}{}{}",
+                    self.tags_str().unwrap_or(""),
+                    tag.as_ref(),
+                    INLINE_SEPARATOR,
+                    TAG_END,
+                    self.name()
+                )
+                .into(),
+                from: self.into(),
+            })
         }
     }
 
@@ -173,26 +183,32 @@ mod tests {
     }
 
     #[test]
-    fn add_returns_path_with_tag_added() {
+    fn add_tag_returns_path_with_tag_added() {
         assert_eq!(
             TaggedFile::new("foo-_bar".to_owned())
                 .unwrap()
-                .add(Tag::new("baz".to_owned()).unwrap()),
-            Ok("foo-baz-_bar".to_owned())
+                .add_tag(Tag::new("baz".to_owned()).unwrap()),
+            Ok(MoveInstruction {
+                from: "foo-_bar".into(),
+                to: "foo-baz-_bar".into()
+            })
         );
         assert_eq!(
             TaggedFile::new("foo/_bar".to_owned())
                 .unwrap()
-                .add(Tag::new("baz".to_owned()).unwrap()),
-            Ok("foo/baz-_bar".to_owned())
+                .add_tag(Tag::new("baz".to_owned()).unwrap()),
+            Ok(MoveInstruction {
+                from: "foo/_bar".into(),
+                to: "foo/baz-_bar".into()
+            })
         );
     }
 
     #[test]
-    fn add_returns_none_if_file_already_has_tag() {
+    fn add_tag_returns_none_if_file_already_has_tag() {
         assert!(TaggedFile::new("foo-_bar".to_owned())
             .unwrap()
-            .add(Tag::new("foo".to_owned()).unwrap())
+            .add_tag(Tag::new("foo".to_owned()).unwrap())
             .is_err(),);
     }
 

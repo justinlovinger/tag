@@ -1,6 +1,9 @@
 use filesystem::FileSystem;
 
-use crate::{tagged_file::FileAlreadyHasTagError, TagRef, TaggedFile};
+use crate::{
+    tagged_file::{FileAlreadyHasTagError, MoveInstruction},
+    TagRef, TaggedFile,
+};
 
 #[derive(Debug)]
 pub struct TaggedFilesystem<F> {
@@ -21,12 +24,12 @@ where
         Self { fs }
     }
 
-    pub fn add<T>(&self, tag: T, file: &TaggedFile) -> Result<(), AddError<T>>
+    pub fn add_tag<T>(&self, tag: T, file: TaggedFile) -> Result<(), AddError<T>>
     where
         T: AsRef<TagRef>,
     {
-        let to = file.add(tag)?;
-        Ok(self.fs.rename(file, to)?)
+        let MoveInstruction { from, to } = file.add_tag(tag)?;
+        Ok(self.fs.rename(from, to)?)
     }
 }
 
@@ -39,7 +42,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn add_moves_file_if_file_does_not_have_tag() {
+    fn add_tag_moves_file_if_file_does_not_have_tag() {
         let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
 
         let tag = Tag::new("baz".to_owned()).unwrap();
@@ -53,7 +56,7 @@ mod tests {
         for (file, dest) in files.into_iter().zip(destinations.into_iter()) {
             filesystem.fs.create_file(&file, "").unwrap();
 
-            assert!(filesystem.add(&tag, &file).is_ok());
+            assert!(filesystem.add_tag(&tag, file.clone()).is_ok());
 
             assert!(filesystem.fs.is_file(dest));
             assert!(!filesystem.fs.is_file(file));
@@ -61,7 +64,7 @@ mod tests {
     }
 
     #[test]
-    fn add_returns_error_if_file_already_has_tag() {
+    fn add_tag_returns_error_if_file_already_has_tag() {
         let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
 
         let tag = Tag::new("foo".to_owned()).unwrap();
@@ -69,6 +72,6 @@ mod tests {
 
         filesystem.fs.create_file(&file, "").unwrap();
 
-        assert!(filesystem.add(&tag, &file).is_err());
+        assert!(filesystem.add_tag(&tag, file).is_err());
     }
 }
