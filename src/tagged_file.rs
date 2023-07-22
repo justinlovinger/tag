@@ -55,6 +55,12 @@ pub enum InlineTagError<T> {
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
+pub enum UninlineTagError<T> {
+    LacksTag(#[from] LacksTagError<T>),
+    AlreadyUninline(#[from] AlreadyUninlineError<T>),
+}
+
+#[derive(Debug, PartialEq, thiserror::Error)]
 #[error("`{0}` already has `{1}`")]
 pub struct HasTagError<T>(TaggedFile, T);
 
@@ -65,6 +71,10 @@ pub struct LacksTagError<T>(TaggedFile, T);
 #[derive(Debug, PartialEq, thiserror::Error)]
 #[error("`{0}` already has `{1}` inline")]
 pub struct AlreadyInlineError<T>(TaggedFile, T);
+
+#[derive(Debug, PartialEq, thiserror::Error)]
+#[error("`{0}` already has `{1}` as a directory-tag")]
+pub struct AlreadyUninlineError<T>(TaggedFile, T);
 
 impl TaggedFile {
     pub fn new(path: String) -> Option<TaggedFile> {
@@ -218,6 +228,34 @@ impl TaggedFile {
         }
     }
 
+    pub fn uninline_tag<T>(self, tag: T) -> Result<impl Iterator<Item = Op>, UninlineTagError<T>>
+    where
+        T: AsRef<TagRef>,
+    {
+        let tag_indices = self.indices_of(&tag);
+        match tag_indices {
+            Some(tag_indices) => {
+                if self.separator_of(tag_indices) == DIR_SEPARATOR {
+                    return Err(AlreadyUninlineError(self, tag).into());
+                }
+
+                let dir = self.path_up_to_including(tag_indices);
+                let remaining_path = self.path_after(tag_indices);
+                let to_path = format!("{}{}{}", dir, DIR_SEPARATOR, remaining_path);
+
+                Ok([
+                    Op::EnsureDirectory(dir.into()),
+                    Op::Move {
+                        from: self.into(),
+                        to: to_path.into(),
+                    },
+                ]
+                .into_iter())
+            }
+            None => Err(LacksTagError(self, tag).into()),
+        }
+    }
+
     fn indices_of<T>(&self, tag: T) -> Option<TagIndices>
     where
         T: AsRef<TagRef>,
@@ -256,6 +294,9 @@ impl TaggedFile {
         unsafe { self.path.get_unchecked(..x.1) }
     }
 
+    // Note,
+    // this skips the separator
+    // after the given tag.
     fn path_after(&self, x: TagIndices) -> &str {
         // This is safe
         // because `x.1` is always a separator
@@ -503,7 +544,7 @@ mod tests {
 
     #[test]
     fn inline_tag_returns_err_if_file_lacks_tag() {
-        assert!(TaggedFile::new("foo-_bar".to_owned())
+        assert!(TaggedFile::new("foo/_bar".to_owned())
             .unwrap()
             .inline_tag(Tag::new("baz".to_owned()).unwrap())
             .is_err());
@@ -514,6 +555,45 @@ mod tests {
         assert!(TaggedFile::new("foo-_bar".to_owned())
             .unwrap()
             .inline_tag(Tag::new("foo".to_owned()).unwrap())
+            .is_err());
+    }
+
+    #[test]
+    fn uninline_tag_returns_path_with_tag_as_dir() {
+        test_uninline_tag("foo-_bar", "foo", "foo/_bar", "foo");
+        test_uninline_tag("foo-baz-_bar", "foo", "foo/baz-_bar", "foo");
+        test_uninline_tag("foo/baz-_bar", "baz", "foo/baz/_bar", "foo/baz");
+    }
+
+    fn test_uninline_tag(file: &str, tag: &str, expected_to: &str, expected_mk_dir: &str) {
+        assert_eq!(
+            TaggedFile::new(file.to_owned())
+                .unwrap()
+                .uninline_tag(Tag::new(tag.to_owned()).unwrap())
+                .map(Vec::from_iter),
+            Ok(vec![
+                Op::EnsureDirectory(expected_mk_dir.into()),
+                Op::Move {
+                    from: file.into(),
+                    to: expected_to.into()
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn uninline_tag_returns_err_if_file_lacks_tag() {
+        assert!(TaggedFile::new("foo-_bar".to_owned())
+            .unwrap()
+            .uninline_tag(Tag::new("baz".to_owned()).unwrap())
+            .is_err());
+    }
+
+    #[test]
+    fn uninline_tag_returns_err_if_tag_is_already_dir() {
+        assert!(TaggedFile::new("foo/_bar".to_owned())
+            .unwrap()
+            .uninline_tag(Tag::new("foo".to_owned()).unwrap())
             .is_err());
     }
 
