@@ -1,7 +1,7 @@
 use filesystem::FileSystem;
 
 use crate::{
-    tagged_file::{HasTagError, LacksTagError, MoveInstruction},
+    tagged_file::{HasTagError, LacksTagError, Op},
     TagRef, TaggedFile,
 };
 
@@ -34,16 +34,55 @@ where
     where
         T: AsRef<TagRef>,
     {
-        let MoveInstruction { from, to } = file.add_inline_tag(tag)?;
-        Ok(self.fs.rename(from, to)?)
+        self.apply_all(file.add_inline_tag(tag)?)?;
+        Ok(())
     }
 
     pub fn del_tag<T>(&self, tag: T, file: TaggedFile) -> Result<(), DelError<T>>
     where
         T: AsRef<TagRef>,
     {
-        let MoveInstruction { from, to } = file.del_tag(tag)?;
-        Ok(self.fs.rename(from, to)?)
+        self.apply_all(file.del_tag(tag)?)?;
+        Ok(())
+    }
+
+    fn apply_all(&self, ops: impl Iterator<Item = Op>) -> std::io::Result<()> {
+        // Note:
+        // the application of sequences of operations can be optimized
+        // by making directories first,
+        // moving files next,
+        // and deleting directories last,
+        // while squashing duplicate operations to make or delete directories.
+        for op in ops {
+            self.apply(op)?
+        }
+        Ok(())
+    }
+
+    fn apply(&self, op: Op) -> std::io::Result<()> {
+        match op {
+            Op::EnsureDirectory(path) => self.fs.create_dir_all(path),
+            Op::Move { from, to } => self.fs.rename(from, to),
+            Op::DeleteDirectoryIfEmpty(path) => {
+                if self.fs.read_dir(&path)?.next().is_none() {
+                    self.fs.remove_dir(path)
+                } else {
+                    Ok(())
+                }
+
+                // Note,
+                // we can do the following with nightly Rust,
+                // which may be more efficient:
+                // ```
+                // if let Err(e) = self.fs.remove_dir(path) {
+                //     if e.kind() != std::io::ErrorKind::DirectoryNotEmpty {
+                //         return Err(e);
+                //     }
+                // };
+                // Ok(())
+                // ```
+            }
+        }
     }
 }
 

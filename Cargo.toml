@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+auto_enums = "0.8.1"
 clap = { version = "4.1.4", features = ["derive"] }
 derive_more = "0.99.17"
 filesystem = "0.4.4"

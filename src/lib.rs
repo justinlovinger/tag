@@ -12,5 +12,6 @@ pub use crate::{
 };
 
 pub const INLINE_SEPARATOR: char = '-';
-pub const SEPARATORS: [char; 2] = [INLINE_SEPARATOR, '/'];
+pub const DIR_SEPARATOR: char = '/'; // This should depend on platform
+pub const SEPARATORS: [char; 2] = [INLINE_SEPARATOR, DIR_SEPARATOR];
 pub const TAG_END: char = '_';

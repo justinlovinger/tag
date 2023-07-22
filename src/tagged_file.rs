@@ -1,9 +1,12 @@
 use std::{
     fmt,
+    iter::once,
     path::{Path, PathBuf},
 };
 
-use crate::{TagRef, INLINE_SEPARATOR, SEPARATORS, TAG_END};
+use auto_enums::auto_enum;
+
+use crate::{TagRef, DIR_SEPARATOR, INLINE_SEPARATOR, SEPARATORS, TAG_END};
 
 #[derive(Clone, Debug)]
 pub struct TaggedFile {
@@ -15,7 +18,7 @@ pub struct TaggedFile {
     /// Slice indices to get tags from `path`,
     /// start inclusive
     /// and end exclusive.
-    tags: Vec<SliceIndices>,
+    tags: Vec<TagIndices>,
 }
 
 impl PartialEq for TaggedFile {
@@ -29,6 +32,28 @@ impl PartialEq for TaggedFile {
 #[derive(Clone, Copy, Debug)]
 struct SliceIndices(usize, usize);
 
+#[derive(Clone, Copy, Debug)]
+struct TagIndices(usize, usize);
+
+impl From<TagIndices> for SliceIndices {
+    fn from(value: TagIndices) -> Self {
+        SliceIndices(value.0, value.1)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Op {
+    EnsureDirectory(PathBuf),
+    Move { from: PathBuf, to: PathBuf },
+    DeleteDirectoryIfEmpty(PathBuf),
+}
+
+#[derive(Debug, PartialEq, thiserror::Error)]
+pub enum InlineTagError<T> {
+    LacksTag(#[from] LacksTagError<T>),
+    AlreadyInline(#[from] AlreadyInlineError<T>),
+}
+
 #[derive(Debug, PartialEq, thiserror::Error)]
 #[error("`{0}` already has `{1}`")]
 pub struct HasTagError<T>(TaggedFile, T);
@@ -37,11 +62,9 @@ pub struct HasTagError<T>(TaggedFile, T);
 #[error("`{0}` lacks `{1}`")]
 pub struct LacksTagError<T>(TaggedFile, T);
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct MoveInstruction {
-    pub from: PathBuf,
-    pub to: PathBuf,
-}
+#[derive(Debug, PartialEq, thiserror::Error)]
+#[error("`{0}` already has `{1}` inline")]
+pub struct AlreadyInlineError<T>(TaggedFile, T);
 
 impl TaggedFile {
     pub fn new(path: String) -> Option<TaggedFile> {
@@ -52,16 +75,15 @@ impl TaggedFile {
                 if i == tag_start {
                     return None;
                 } else {
-                    tags.push(SliceIndices(tag_start, i));
+                    tags.push(TagIndices(tag_start, i));
                 }
-                // This slice index is safe
-                // because all separaters are one byte.
-                tag_start = i + 1;
+                // Skip this separator
+                // for the start of the next tag.
+                tag_start = i + c.len_utf8();
             } else if c == TAG_END && i == tag_start {
                 return Some(TaggedFile {
-                    // This slice index is safe
-                    // because the tag-end character is one byte.
-                    name: SliceIndices(i + 1, path.len()),
+                    // Do not include tag-end in name.
+                    name: SliceIndices(i + c.len_utf8(), path.len()),
                     path,
                     tags,
                 });
@@ -83,23 +105,24 @@ impl TaggedFile {
 
     pub fn tags_str(&self) -> Option<&str> {
         // This is safe
-        // because slice indices are at character bounds
-        // and +1 is safe
-        // because all separators are one byte.
+        // because slice indices are at character bounds.
+        let last_tag_indices = *self.tags.last()?;
         Some(unsafe {
-            self.path
-                .get_unchecked(self.tags.first()?.0..(self.tags.last()?.1 + 1))
+            self.path.get_unchecked(
+                self.tags.first()?.0
+                    ..(last_tag_indices.1 + self.separator_of(last_tag_indices).len_utf8()),
+            )
         })
     }
 
-    pub fn add_inline_tag<T>(self, tag: T) -> Result<MoveInstruction, HasTagError<T>>
+    pub fn add_inline_tag<T>(self, tag: T) -> Result<impl Iterator<Item = Op>, HasTagError<T>>
     where
         T: AsRef<TagRef>,
     {
         if self.tags().any(|x| x == tag.as_ref()) {
             Err(HasTagError(self, tag))
         } else {
-            Ok(MoveInstruction {
+            Ok(once(Op::Move {
                 to: format!(
                     "{}{}{}{}{}",
                     self.tags_str().unwrap_or(""),
@@ -110,43 +133,149 @@ impl TaggedFile {
                 )
                 .into(),
                 from: self.into(),
-            })
+            }))
         }
     }
 
-    pub fn del_tag<T>(self, tag: T) -> Result<MoveInstruction, LacksTagError<T>>
+    pub fn del_tag<T>(self, tag: T) -> Result<impl Iterator<Item = Op>, LacksTagError<T>>
     where
         T: AsRef<TagRef>,
     {
-        let i = self.tags().zip(self.tags.iter()).find_map(|(tag_, i)| {
-            if tag_ == tag.as_ref() {
-                Some(i)
-            } else {
-                None
-            }
-        });
-        match i {
-            Some(i) => {
-                Ok(MoveInstruction {
-                    to: format!(
-                        "{}{}",
-                        // This is safe
-                        // because we know `i.0` is the start of a character
-                        unsafe { self.path.get_unchecked(..i.0) },
-                        // This is safe
-                        // because `i.1` is always a separator
-                        // and every separator is one byte.
-                        unsafe { self.path.get_unchecked(i.1 + 1..) },
-                    )
-                    .into(),
-                    from: self.into(),
-                })
-            }
+        let x = self.indices_of(&tag);
+        match x {
+            Some(x) => Ok(once(Op::Move {
+                to: format!("{}{}", self.path_up_to(x), self.path_after(x)).into(),
+                from: self.into(),
+            })),
             None => Err(LacksTagError(self, tag)),
         }
     }
 
-    fn slice(&self, x: SliceIndices) -> &str {
+    #[auto_enum]
+    pub fn inline_tag<T>(self, tag: T) -> Result<impl Iterator<Item = Op>, InlineTagError<T>>
+    where
+        T: AsRef<TagRef>,
+    {
+        let tag_indices = self.indices_of(&tag);
+        match tag_indices {
+            Some(tag_indices) => {
+                if self.separator_of(tag_indices) == INLINE_SEPARATOR {
+                    return Err(AlreadyInlineError(self, tag).into());
+                }
+
+                let dir = self.path_up_to_including(tag_indices).to_owned();
+                let remaining_path = self.path_after(tag_indices);
+                let to_path = format!("{}{}{}", dir, INLINE_SEPARATOR, remaining_path);
+
+                Ok(
+                    #[auto_enum(Iterator)]
+                    match remaining_path.find(DIR_SEPARATOR).map(|mut next_dir| {
+                        // We add the length of everything before `remaining_path`
+                        // so index refers to original string.
+                        // We will add the length of the separator later
+                        // because it depends on which string we slice.
+                        next_dir += dir.as_bytes().len();
+                        (
+                            // These are safe
+                            // assuming we correctly constructed `next_dir` above.
+                            Op::EnsureDirectory(
+                                unsafe {
+                                    to_path.get_unchecked(..next_dir + INLINE_SEPARATOR.len_utf8())
+                                }
+                                .into(),
+                            ),
+                            Op::DeleteDirectoryIfEmpty(
+                                unsafe {
+                                    self.path
+                                        .get_unchecked(..next_dir + DIR_SEPARATOR.len_utf8())
+                                }
+                                .into(),
+                            ),
+                        )
+                    }) {
+                        Some((pre_move, pre_del)) => [
+                            pre_move,
+                            Op::Move {
+                                from: self.into(),
+                                to: to_path.into(),
+                            },
+                            pre_del,
+                            Op::DeleteDirectoryIfEmpty(dir.into()),
+                        ]
+                        .into_iter(),
+                        None => [
+                            Op::Move {
+                                from: self.into(),
+                                to: to_path.into(),
+                            },
+                            Op::DeleteDirectoryIfEmpty(dir.into()),
+                        ]
+                        .into_iter(),
+                    },
+                )
+            }
+            None => Err(LacksTagError(self, tag).into()),
+        }
+    }
+
+    fn indices_of<T>(&self, tag: T) -> Option<TagIndices>
+    where
+        T: AsRef<TagRef>,
+    {
+        self.tags().zip(self.tags.iter()).find_map(|(tag_, i)| {
+            if tag_ == tag.as_ref() {
+                Some(*i)
+            } else {
+                None
+            }
+        })
+    }
+
+    fn path_up_to<T>(&self, x: T) -> &str
+    where
+        T: Into<SliceIndices>,
+    {
+        let x = x.into();
+        // This is safe
+        // because we know `x.0` is the start of a character
+        unsafe { self.path.get_unchecked(..x.0) }
+    }
+
+    // Note,
+    // when used on a tag,
+    // this does not include the separator
+    // at the end of the tag,
+    // just the tag itself.
+    fn path_up_to_including<T>(&self, x: T) -> &str
+    where
+        T: Into<SliceIndices>,
+    {
+        let x = x.into();
+        // This is safe
+        // because we know `x.1` is the start of a character.
+        unsafe { self.path.get_unchecked(..x.1) }
+    }
+
+    fn path_after(&self, x: TagIndices) -> &str {
+        // This is safe
+        // because `x.1` is always a separator
+        unsafe {
+            self.path
+                .get_unchecked(x.1 + self.separator_of(x).len_utf8()..)
+        }
+    }
+
+    fn separator_of(&self, x: TagIndices) -> char {
+        // This is safe
+        // because all tag-slice indices are in `path`.
+        char::from(*unsafe { self.path.as_bytes().get_unchecked(x.1) })
+    }
+
+    fn slice<T>(&self, x: T) -> &str
+    where
+        T: Into<SliceIndices>,
+    {
+        let x = x.into();
         // This is safe when used with already verified slices
         // from the same instance.
         unsafe { self.path.get_unchecked(x.0..x.1) }
@@ -260,11 +389,12 @@ mod tests {
         assert_eq!(
             TaggedFile::new(file.to_owned())
                 .unwrap()
-                .add_inline_tag(Tag::new(tag.to_owned()).unwrap()),
-            Ok(MoveInstruction {
+                .add_inline_tag(Tag::new(tag.to_owned()).unwrap())
+                .map(Vec::from_iter),
+            Ok(vec![Op::Move {
                 from: file.into(),
                 to: expected_to.into()
-            })
+            }])
         );
     }
 
@@ -289,11 +419,12 @@ mod tests {
         assert_eq!(
             TaggedFile::new(file.to_owned())
                 .unwrap()
-                .del_tag(Tag::new(tag.to_owned()).unwrap()),
-            Ok(MoveInstruction {
+                .del_tag(Tag::new(tag.to_owned()).unwrap())
+                .map(Vec::from_iter),
+            Ok(vec![Op::Move {
                 from: file.into(),
                 to: expected_to.into()
-            })
+            }])
         );
     }
 
@@ -302,6 +433,87 @@ mod tests {
         assert!(TaggedFile::new("foo-_bar".to_owned())
             .unwrap()
             .del_tag(Tag::new("baz".to_owned()).unwrap())
+            .is_err());
+    }
+
+    #[test]
+    fn inline_tag_returns_path_with_tag_inline() {
+        test_inline_tag("foo/_bar", "foo", "foo-_bar", "foo");
+        test_inline_tag("foo/baz-_bar", "foo", "foo-baz-_bar", "foo");
+        test_inline_tag("foo/baz/_bar", "baz", "foo/baz-_bar", "foo/baz");
+    }
+
+    fn test_inline_tag(file: &str, tag: &str, expected_to: &str, expected_del_dir: &str) {
+        assert_eq!(
+            TaggedFile::new(file.to_owned())
+                .unwrap()
+                .inline_tag(Tag::new(tag.to_owned()).unwrap())
+                .map(Vec::from_iter),
+            Ok(vec![
+                Op::Move {
+                    from: file.into(),
+                    to: expected_to.into()
+                },
+                Op::DeleteDirectoryIfEmpty(expected_del_dir.into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn inline_tag_ensures_directory_exists_if_directory_tags_are_merged() {
+        test_inline_tag_with_ensure_dir(
+            "foo/baz/_bar",
+            "foo",
+            "foo-baz",
+            "foo-baz/_bar",
+            ["foo/baz", "foo"],
+        );
+        test_inline_tag_with_ensure_dir(
+            "a/foo/baz/_bar",
+            "foo",
+            "a/foo-baz",
+            "a/foo-baz/_bar",
+            ["a/foo/baz", "a/foo"],
+        );
+    }
+
+    fn test_inline_tag_with_ensure_dir(
+        file: &str,
+        tag: &str,
+        expected_ensure_dir: &str,
+        expected_to: &str,
+        expected_del_dir: [&str; 2],
+    ) {
+        assert_eq!(
+            TaggedFile::new(file.to_owned())
+                .unwrap()
+                .inline_tag(Tag::new(tag.to_owned()).unwrap())
+                .map(Vec::from_iter),
+            Ok(vec![
+                Op::EnsureDirectory(expected_ensure_dir.into()),
+                Op::Move {
+                    from: file.into(),
+                    to: expected_to.into()
+                },
+                Op::DeleteDirectoryIfEmpty(expected_del_dir[0].into()),
+                Op::DeleteDirectoryIfEmpty(expected_del_dir[1].into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn inline_tag_returns_err_if_file_lacks_tag() {
+        assert!(TaggedFile::new("foo-_bar".to_owned())
+            .unwrap()
+            .inline_tag(Tag::new("baz".to_owned()).unwrap())
+            .is_err());
+    }
+
+    #[test]
+    fn inline_tag_returns_err_if_tag_is_already_inline() {
+        assert!(TaggedFile::new("foo-_bar".to_owned())
+            .unwrap()
+            .inline_tag(Tag::new("foo".to_owned()).unwrap())
             .is_err());
     }
 
