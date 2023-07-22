@@ -256,6 +256,8 @@ impl TaggedFile {
         }
     }
 
+    /// Return indices corresponding to the given tag
+    /// if this file has the tag.
     fn indices_of<T>(&self, tag: T) -> Option<TagIndices>
     where
         T: AsRef<TagRef>,
@@ -269,6 +271,10 @@ impl TaggedFile {
         })
     }
 
+    /// Return the path
+    /// from the beginning of the file
+    /// to the start of the tag or name
+    /// corresponding to the given indices.
     fn path_up_to<T>(&self, x: T) -> &str
     where
         T: Into<SliceIndices>,
@@ -279,11 +285,13 @@ impl TaggedFile {
         unsafe { self.path.get_unchecked(..x.0) }
     }
 
-    // Note,
-    // when used on a tag,
-    // this does not include the separator
-    // at the end of the tag,
-    // just the tag itself.
+    /// Return the path
+    /// from the beginning of the file
+    /// to the end of tag or name
+    /// corresponding to the given indices.
+    /// when used on a tag,
+    /// this does not include the separator
+    /// following the tag.
     fn path_up_to_including<T>(&self, x: T) -> &str
     where
         T: Into<SliceIndices>,
@@ -294,9 +302,12 @@ impl TaggedFile {
         unsafe { self.path.get_unchecked(..x.1) }
     }
 
-    // Note,
-    // this skips the separator
-    // after the given tag.
+    /// Return the path
+    /// from the end of the tag
+    /// corresponding to the given indices
+    /// to the end of the file.
+    /// This does not include the tag
+    /// or the separator following the tag.
     fn path_after(&self, x: TagIndices) -> &str {
         // This is safe
         // because `x.1` is always a separator
@@ -306,6 +317,9 @@ impl TaggedFile {
         }
     }
 
+    /// Return the separator
+    /// following the tag
+    /// corresponding to the given indices.
     fn separator_of(&self, x: TagIndices) -> char {
         // This is safe
         // because all tag-slice indices are in `path`.
