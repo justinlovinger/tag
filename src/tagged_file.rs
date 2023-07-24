@@ -534,6 +534,17 @@ mod tests {
             "a/foo-baz/_bar",
             ["a/foo/baz", "a/foo"],
         );
+        // Note,
+        // this should also delete tag-directories in next directory:
+        // ```
+        // test_inline_tag_with_ensure_dir(
+        //     "a/foo/baz/b/_bar",
+        //     "foo",
+        //     "a/foo-baz/b",
+        //     "a/foo-baz/b/_bar",
+        //     ["a/foo/baz/b", "a/foo/baz", "a/foo"],
+        // );
+        // ```
     }
 
     fn test_inline_tag_with_ensure_dir(
