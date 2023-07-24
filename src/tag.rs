@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, cmp::Ordering, ops::Deref};
+use std::{borrow::Borrow, cmp::Ordering, ops::Deref, path::Path};
 
 use derive_more::Display;
 use ref_cast::{ref_cast_custom, RefCastCustom};
@@ -68,6 +68,12 @@ impl AsRef<TagRef> for Tag {
 impl Borrow<TagRef> for Tag {
     fn borrow(&self) -> &TagRef {
         TagRef::new(self.0.as_str())
+    }
+}
+
+impl AsRef<Path> for TagRef {
+    fn as_ref(&self) -> &Path {
+        self.0.as_ref()
     }
 }
 

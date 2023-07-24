@@ -125,6 +125,10 @@ impl TaggedFile {
         })
     }
 
+    pub fn as_path(&self) -> &Path {
+        self.path.as_ref()
+    }
+
     pub fn add_inline_tag<T>(self, tag: T) -> Result<impl Iterator<Item = Op>, HasTagError<T>>
     where
         T: AsRef<TagRef>,
