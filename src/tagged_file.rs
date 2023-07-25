@@ -134,16 +134,16 @@ impl TaggedFile {
             .map(|x| TagRef::new(self.slice(x)))
     }
 
-    pub fn tags_str(&self) -> Option<&str> {
-        // This is safe
-        // because slice indices are at character bounds.
-        let last_tag_indices = *self.tags.last()?;
-        Some(unsafe {
-            self.path.get_unchecked(
-                self.tags.first()?.0
-                    ..(last_tag_indices.1 + self.separator_of(last_tag_indices).len_utf8()),
-            )
-        })
+    pub fn tags_str(&self) -> &str {
+        match (self.tags.first(), self.tags.last()) {
+            // This is safe
+            // because slice indices are at character bounds.
+            (Some(x), Some(y)) => unsafe {
+                self.path
+                    .get_unchecked(x.0..(y.1 + self.separator_of(*y).len_utf8()))
+            },
+            _ => "",
+        }
     }
 
     pub fn as_path(&self) -> &Path {
@@ -160,7 +160,7 @@ impl TaggedFile {
             Ok(once(Op::Move {
                 to: format!(
                     "{}{}{}{}{}",
-                    self.tags_str().unwrap_or(""),
+                    self.tags_str(),
                     tag.as_ref(),
                     INLINE_SEPARATOR,
                     TAG_END,
@@ -441,11 +441,10 @@ mod tests {
 
     #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
     fn tags_str_returns_string_of_all_tags_with_separators(raw_file: RawTaggedFile) {
-        prop_assume!(!raw_file.tags.is_empty());
         let file = TaggedFile::new(raw_file.to_string()).unwrap();
         let path = raw_file.to_string();
         prop_assert_eq!(
-            file.tags_str().unwrap(),
+            file.tags_str(),
             path.strip_suffix(&raw_file.name)
                 .unwrap()
                 .strip_suffix(TAG_END)
