@@ -33,6 +33,16 @@ enum Commands {
         #[clap(required = true, value_name = "FILE", value_parser = tagged_file_parser)]
         files: Vec<TaggedFile>,
     },
+    /// Organize all tagged files under the current working directory
+    ///
+    /// Tags are split into directories,
+    /// most frequent first.
+    /// Ties are broken in favor of longer tags
+    /// and then lexicographical order.
+    /// Unique tags are inlined.
+    ///
+    /// Untagged files are not changed.
+    Organize,
 }
 
 fn tag_parser(s: &str) -> Result<Tag, String> {
@@ -70,6 +80,7 @@ fn main() -> std::io::Result<()> {
                 }
             }
         }
+        Some(Commands::Organize) => filesystem.organize()?,
         None => (),
     }
 

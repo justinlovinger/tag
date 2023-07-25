@@ -5,8 +5,12 @@ use ref_cast::{ref_cast_custom, RefCastCustom};
 
 use crate::{SEPARATORS, TAG_END};
 
-#[derive(Clone, Debug, Display, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Display, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Tag(String);
+
+#[derive(Debug, Display, PartialEq, Eq, PartialOrd, Ord, Hash, RefCastCustom)]
+#[repr(transparent)]
+pub struct TagRef(str);
 
 impl Tag {
     pub fn new(s: String) -> Option<Tag> {
@@ -16,15 +20,27 @@ impl Tag {
             Some(Tag(s))
         }
     }
-}
 
-#[derive(Debug, Display, PartialEq, Eq, PartialOrd, Ord, RefCastCustom)]
-#[repr(transparent)]
-pub struct TagRef(str);
+    pub fn as_path(&self) -> &Path {
+        self.0.as_ref()
+    }
+}
 
 impl TagRef {
     #[ref_cast_custom]
     pub(crate) const fn new(s: &str) -> &Self;
+
+    pub fn as_path(&self) -> &Path {
+        self.0.as_ref()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 impl PartialOrd<&TagRef> for Tag {
@@ -51,6 +67,12 @@ impl PartialEq<Tag> for &TagRef {
     }
 }
 
+impl From<Tag> for String {
+    fn from(value: Tag) -> Self {
+        value.0
+    }
+}
+
 impl Deref for Tag {
     type Target = TagRef;
 
@@ -71,9 +93,11 @@ impl Borrow<TagRef> for Tag {
     }
 }
 
-impl AsRef<Path> for TagRef {
-    fn as_ref(&self) -> &Path {
-        self.0.as_ref()
+impl ToOwned for TagRef {
+    type Owned = Tag;
+
+    fn to_owned(&self) -> Self::Owned {
+        Tag(self.0.to_owned())
     }
 }
 

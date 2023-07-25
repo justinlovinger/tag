@@ -10,6 +10,7 @@ auto_enums = "0.8.1"
 clap = { version = "4.1.4", features = ["derive"] }
 derive_more = "0.99.17"
 filesystem = "0.4.4"
+itertools = "0.11.0"
 ref-cast = "1.0.14"
 thiserror = "1.0.43"
 

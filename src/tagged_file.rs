@@ -61,13 +61,31 @@ impl From<TagIndices> for SliceIndices {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Op {
     EnsureDirectory(PathBuf),
-    Move { from: PathBuf, to: PathBuf },
+    Move(MoveOp),
     DeleteDirectoryIfEmpty(PathBuf),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MoveOp {
+    pub from: PathBuf,
+    pub to: PathBuf,
+}
+
+impl From<MoveOp> for Op {
+    fn from(value: MoveOp) -> Self {
+        Op::Move(value)
+    }
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
 #[error("`{0}` is not a tagged file")]
 pub struct NewError(String);
+
+impl NewError {
+    pub fn into_path(self) -> PathBuf {
+        self.0.into()
+    }
+}
 
 #[derive(Debug, PartialEq, thiserror::Error)]
 pub enum InlineTagError<T> {
@@ -123,6 +141,14 @@ impl TaggedFile {
         Err(NewError(path))
     }
 
+    pub fn from_path(path: PathBuf) -> Result<TaggedFile, NewError> {
+        Self::new(
+            path.into_os_string()
+                .into_string()
+                .expect("path should contain valid unicode"),
+        )
+    }
+
     pub fn name(&self) -> &str {
         self.slice(self.name)
     }
@@ -157,7 +183,7 @@ impl TaggedFile {
         if self.tags().any(|x| x == tag.as_ref()) {
             Err(HasTagError(self, tag))
         } else {
-            Ok(once(Op::Move {
+            Ok(once(Op::Move(MoveOp {
                 to: format!(
                     "{}{}{}{}{}",
                     self.tags_str(),
@@ -168,7 +194,7 @@ impl TaggedFile {
                 )
                 .into(),
                 from: self.into(),
-            }))
+            })))
         }
     }
 
@@ -178,10 +204,10 @@ impl TaggedFile {
     {
         let x = self.indices_of(&tag);
         match x {
-            Some(x) => Ok(once(Op::Move {
+            Some(x) => Ok(once(Op::Move(MoveOp {
                 to: format!("{}{}", self.path_up_to(x), self.path_after(x)).into(),
                 from: self.into(),
-            })),
+            }))),
             None => Err(LacksTagError(self, tag)),
         }
     }
@@ -230,19 +256,19 @@ impl TaggedFile {
                     }) {
                         Some((pre_move, pre_del)) => [
                             pre_move,
-                            Op::Move {
+                            Op::Move(MoveOp {
                                 from: self.into(),
                                 to: to_path.into(),
-                            },
+                            }),
                             pre_del,
                             Op::DeleteDirectoryIfEmpty(dir.into()),
                         ]
                         .into_iter(),
                         None => [
-                            Op::Move {
+                            Op::Move(MoveOp {
                                 from: self.into(),
                                 to: to_path.into(),
-                            },
+                            }),
                             Op::DeleteDirectoryIfEmpty(dir.into()),
                         ]
                         .into_iter(),
@@ -270,10 +296,10 @@ impl TaggedFile {
 
                 Ok([
                     Op::EnsureDirectory(dir.into()),
-                    Op::Move {
+                    Op::Move(MoveOp {
                         from: self.into(),
                         to: to_path.into(),
-                    },
+                    }),
                 ]
                 .into_iter())
             }
@@ -464,10 +490,10 @@ mod tests {
                 .unwrap()
                 .add_inline_tag(Tag::new(tag.to_owned()).unwrap())
                 .map(Vec::from_iter),
-            Ok(vec![Op::Move {
+            Ok(vec![Op::Move(MoveOp {
                 from: file.into(),
                 to: expected_to.into()
-            }])
+            })])
         );
     }
 
@@ -494,10 +520,10 @@ mod tests {
                 .unwrap()
                 .del_tag(Tag::new(tag.to_owned()).unwrap())
                 .map(Vec::from_iter),
-            Ok(vec![Op::Move {
+            Ok(vec![Op::Move(MoveOp {
                 from: file.into(),
                 to: expected_to.into()
-            }])
+            })])
         );
     }
 
@@ -523,10 +549,10 @@ mod tests {
                 .inline_tag(Tag::new(tag.to_owned()).unwrap())
                 .map(Vec::from_iter),
             Ok(vec![
-                Op::Move {
+                Op::Move(MoveOp {
                     from: file.into(),
                     to: expected_to.into()
-                },
+                }),
                 Op::DeleteDirectoryIfEmpty(expected_del_dir.into()),
             ])
         );
@@ -575,10 +601,10 @@ mod tests {
                 .map(Vec::from_iter),
             Ok(vec![
                 Op::EnsureDirectory(expected_ensure_dir.into()),
-                Op::Move {
+                Op::Move(MoveOp {
                     from: file.into(),
                     to: expected_to.into()
-                },
+                }),
                 Op::DeleteDirectoryIfEmpty(expected_del_dir[0].into()),
                 Op::DeleteDirectoryIfEmpty(expected_del_dir[1].into()),
             ])
@@ -616,10 +642,10 @@ mod tests {
                 .map(Vec::from_iter),
             Ok(vec![
                 Op::EnsureDirectory(expected_mk_dir.into()),
-                Op::Move {
+                Op::Move(MoveOp {
                     from: file.into(),
                     to: expected_to.into()
-                },
+                }),
             ])
         );
     }
