@@ -53,7 +53,7 @@ where
             }
 
             for other_file in self.fs.read_dir(parent)? {
-                if let Some(other_file) = TaggedFile::new(
+                if let Ok(other_file) = TaggedFile::new(
                     other_file?
                         .path()
                         .into_os_string()

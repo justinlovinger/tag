@@ -49,6 +49,10 @@ pub enum Op {
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
+#[error("`{0}` is not a tagged file")]
+pub struct NewError(String);
+
+#[derive(Debug, PartialEq, thiserror::Error)]
 pub enum InlineTagError<T> {
     LacksTag(#[from] LacksTagError<T>),
     AlreadyInline(#[from] AlreadyInlineError<T>),
@@ -77,13 +81,13 @@ pub struct AlreadyInlineError<T>(TaggedFile, T);
 pub struct AlreadyUninlineError<T>(TaggedFile, T);
 
 impl TaggedFile {
-    pub fn new(path: String) -> Option<TaggedFile> {
+    pub fn new(path: String) -> Result<TaggedFile, NewError> {
         let mut tags = Vec::new();
         let mut tag_start = 0;
         for (i, c) in path.char_indices() {
             if SEPARATORS.contains(&c) {
                 if i == tag_start {
-                    return None;
+                    return Err(NewError(path));
                 } else {
                     tags.push(TagIndices(tag_start, i));
                 }
@@ -91,7 +95,7 @@ impl TaggedFile {
                 // for the start of the next tag.
                 tag_start = i + c.len_utf8();
             } else if c == TAG_END && i == tag_start {
-                return Some(TaggedFile {
+                return Ok(TaggedFile {
                     // Do not include tag-end in name.
                     name: SliceIndices(i + c.len_utf8(), path.len()),
                     path,
@@ -99,7 +103,7 @@ impl TaggedFile {
                 });
             }
         }
-        None
+        Err(NewError(path))
     }
 
     pub fn name(&self) -> &str {
@@ -376,13 +380,13 @@ mod tests {
 
     #[test]
     fn new_returns_some_for_simple_tagged_files() {
-        assert!(TaggedFile::new("foo-bar-_baz".to_owned()).is_some());
-        assert!(TaggedFile::new("foo/bar/_baz".to_owned()).is_some());
+        assert!(TaggedFile::new("foo-bar-_baz".to_owned()).is_ok());
+        assert!(TaggedFile::new("foo/bar/_baz".to_owned()).is_ok());
     }
 
     #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
     fn new_returns_some_for_tagged_files(raw_file: RawTaggedFile) {
-        prop_assert!(TaggedFile::new(raw_file.to_string()).is_some());
+        prop_assert!(TaggedFile::new(raw_file.to_string()).is_ok());
     }
 
     #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
@@ -394,16 +398,16 @@ mod tests {
                     .iter()
                     .any(|ended_sep| s.contains(ended_sep)))
         );
-        prop_assert!(TaggedFile::new(s).is_none());
+        prop_assert!(TaggedFile::new(s).is_err());
     }
 
     #[test]
     fn new_returns_none_for_files_with_empty_tags() {
-        assert!(TaggedFile::new("-bar-_baz".to_owned()).is_none());
-        assert!(TaggedFile::new("foo--_baz".to_owned()).is_none());
-        assert!(TaggedFile::new("/bar-_baz".to_owned()).is_none());
-        assert!(TaggedFile::new("foo/-_baz".to_owned()).is_none());
-        assert!(TaggedFile::new("foo-/_baz".to_owned()).is_none());
+        assert!(TaggedFile::new("-bar-_baz".to_owned()).is_err());
+        assert!(TaggedFile::new("foo--_baz".to_owned()).is_err());
+        assert!(TaggedFile::new("/bar-_baz".to_owned()).is_err());
+        assert!(TaggedFile::new("foo/-_baz".to_owned()).is_err());
+        assert!(TaggedFile::new("foo-/_baz".to_owned()).is_err());
     }
 
     #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]

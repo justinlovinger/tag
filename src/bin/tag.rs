@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
 use filesystem::OsFileSystem;
-use tag::{AddError, DelError, Tag, TaggedFile, TaggedFilesystem, SEPARATORS, TAG_END};
+use tag::{
+    AddError, DelError, Tag, TaggedFile, TaggedFilesystem, DIR_SEPARATOR, INLINE_SEPARATOR, TAG_END,
+};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -35,15 +37,13 @@ enum Commands {
 
 fn tag_parser(s: &str) -> Result<Tag, String> {
     Tag::new(s.to_owned()).ok_or(format!(
-        "tags cannot start with `{}` or contain `{}` or `{}`",
-        TAG_END, SEPARATORS[0], SEPARATORS[1],
+        "tags cannot start with `{TAG_END}` or contain `{INLINE_SEPARATOR}` or `{DIR_SEPARATOR}`"
     ))
 }
 
 fn tagged_file_parser(s: &str) -> Result<TaggedFile, String> {
-    TaggedFile::new(s.to_owned()).ok_or(format!(
-        "tagged files must contain zero or more tags ended by `{}` or `{}` with the tagging portion ended by `{}`",
-        SEPARATORS[0], SEPARATORS[1], TAG_END
+    TaggedFile::new(s.to_owned()).map_err(|e| format!(
+        "{e}: tagged files must contain zero or more tags ended by `{INLINE_SEPARATOR}` or `{DIR_SEPARATOR}` with the tagging portion ended by `{TAG_END}`"
     ))
 }
 
