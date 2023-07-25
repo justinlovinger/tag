@@ -1,5 +1,6 @@
 use std::{
     fmt,
+    hash::Hash,
     iter::once,
     path::{Path, PathBuf},
 };
@@ -21,11 +22,27 @@ pub struct TaggedFile {
     tags: Vec<TagIndices>,
 }
 
+// `name` and `tags` should always be the same
+// for a given `path`.
+impl Eq for TaggedFile {}
 impl PartialEq for TaggedFile {
     fn eq(&self, other: &Self) -> bool {
-        // If `path` is equal,
-        // `name` and `tags` should be too.
         self.path.eq(&other.path)
+    }
+}
+impl Ord for TaggedFile {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.path.cmp(&other.path)
+    }
+}
+impl PartialOrd for TaggedFile {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Hash for TaggedFile {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.path.hash(state)
     }
 }
 
