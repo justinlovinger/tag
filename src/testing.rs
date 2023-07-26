@@ -1,5 +1,6 @@
 use std::fmt;
 
+use itertools::Itertools;
 use lazy_static::lazy_static;
 use proptest::prelude::{prop::collection::vec, *};
 
@@ -62,18 +63,20 @@ impl Arbitrary for RawTaggedFile {
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         (
             NAME_REGEX.as_str(),
-            (0_usize..16).prop_flat_map(|len| {
-                (
-                    vec(Tag::arbitrary(), len),
-                    vec(SEPARATOR_REGEX.as_str(), len).prop_map(|xs| {
-                        xs.into_iter()
-                            .map(|s| s.chars().next().expect("at least one character"))
-                            .collect()
-                    }),
-                )
-            }),
+            vec(Tag::arbitrary(), 0_usize..16)
+                .prop_map(|tags| tags.into_iter().unique().collect_vec())
+                .prop_flat_map(|tags| {
+                    (
+                        vec(SEPARATOR_REGEX.as_str(), tags.len()).prop_map(|xs| {
+                            xs.into_iter()
+                                .map(|s| s.chars().next().expect("at least one character"))
+                                .collect()
+                        }),
+                        Just(tags),
+                    )
+                }),
         )
-            .prop_map(|(name, (tags, seps))| Self { name, tags, seps })
+            .prop_map(|(name, (seps, tags))| Self { name, tags, seps })
             .boxed()
     }
 }

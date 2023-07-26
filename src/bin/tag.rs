@@ -53,7 +53,7 @@ fn tag_parser(s: &str) -> Result<Tag, String> {
 
 fn tagged_file_parser(s: &str) -> Result<TaggedFile, String> {
     TaggedFile::new(s.to_owned()).map_err(|e| format!(
-        "{e}: tagged files must contain zero or more tags ended by `{INLINE_SEPARATOR}` or `{DIR_SEPARATOR}` with the tagging portion ended by `{TAG_END}`"
+        "{e}: tagged files must contain zero or more unique tags ended by `{INLINE_SEPARATOR}` or `{DIR_SEPARATOR}` with the tagging portion ended by `{TAG_END}`"
     ))
 }
 

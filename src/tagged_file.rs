@@ -132,18 +132,37 @@ impl TaggedFile {
                 // for the start of the next tag.
                 tag_start = i + c.len_utf8();
             } else if c == TAG_END && i == tag_start {
-                return Ok(TaggedFile {
+                let file = TaggedFile {
                     // Do not include tag-end in name.
                     name: SliceIndices(i + c.len_utf8(), path.len()),
                     path,
                     tags,
-                });
+                };
+                return if file.tags_unique() {
+                    Ok(file)
+                } else {
+                    Err(NewError(file.path))
+                };
             } else if c != '.' {
                 // A valid tag must have at least one non-'.' character.
                 valid = true;
             }
         }
         Err(NewError(path))
+    }
+
+    fn tags_unique(&self) -> bool {
+        for i in 0..self.tags.len().saturating_sub(1) {
+            // This is safe
+            // because `i` is generated from a safe range of `tags`.
+            let tag = unsafe { self.tags().nth(i).unwrap_unchecked() };
+            for other_tag in self.tags().skip(i + 1) {
+                if tag == other_tag {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     pub fn from_path(path: PathBuf) -> Result<TaggedFile, NewError> {
@@ -465,6 +484,14 @@ mod tests {
         assert!(TaggedFile::new("..-_baz".to_owned()).is_err());
         assert!(TaggedFile::new("foo-.-_baz".to_owned()).is_err());
         assert!(TaggedFile::new("foo-..-_baz".to_owned()).is_err());
+    }
+
+    #[test]
+    fn new_returns_err_if_there_are_duplicate_tags() {
+        assert!(TaggedFile::new("foo-foo-_baz".to_owned()).is_err());
+        assert!(TaggedFile::new("foo/foo/_baz".to_owned()).is_err());
+        assert!(TaggedFile::new("foo-bar/foo/_baz".to_owned()).is_err());
+        assert!(TaggedFile::new("bar/foo-foo/_baz".to_owned()).is_err());
     }
 
     #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]

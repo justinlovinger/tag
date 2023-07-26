@@ -570,12 +570,7 @@ mod tests {
         )
     }
 
-    // This currently fails for some strange unicode inputs
-    // likely unrelated to `organize` itself.
-    // This should be tested
-    // and fixed elsewhere.
-    #[ignore = "failure likely unrelated to method under test"]
-    #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    #[proptest(cases = 10, failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
     fn organize_is_idempotent(files: Vec<TaggedFile>) {
         let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
         for file in files.into_iter().unique() {
