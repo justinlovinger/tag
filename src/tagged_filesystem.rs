@@ -1,4 +1,4 @@
-use std::{fmt::Debug, iter::once, path::PathBuf};
+use std::{fmt, iter::once, path::PathBuf};
 
 use auto_enums::auto_enum;
 use filesystem::{DirEntry, FileSystem};
@@ -6,7 +6,7 @@ use itertools::Itertools;
 
 use crate::{
     tagged_file::{HasTagError, LacksTagError, MoveOp, Op},
-    Tag, TagRef, TaggedFile, INLINE_SEPARATOR, TAG_END,
+    Tag, TagRef, TaggedFile, DIR_SEPARATOR, INLINE_SEPARATOR, TAG_END,
 };
 
 #[derive(Debug)]
@@ -36,7 +36,7 @@ where
 
     pub fn add_tag<T>(&self, tag: T, file: TaggedFile) -> Result<(), AddError<T>>
     where
-        T: Debug + AsRef<TagRef>,
+        T: fmt::Debug + AsRef<TagRef>,
     {
         if let Some(parent) = file.as_path().parent() {
             let dir_tag = parent.join(tag.as_ref().as_path());
@@ -86,7 +86,7 @@ where
 
     pub fn organize(&self) -> std::io::Result<()> {
         let files = self.find_tagged_files("".into())?;
-        let ops = _organize(files, "".into(), Vec::new());
+        let ops = _organize(files, String::new(), Vec::new());
         self.apply_all(
             ops.filter(|MoveOp { from, to }| from != to)
                 .flat_map(clean_move),
@@ -162,7 +162,7 @@ where
 #[auto_enum]
 fn _organize(
     files: Vec<TaggedFile>,
-    prefix: PathBuf,
+    prefix: String,
     tags: Vec<Tag>,
 ) -> impl Iterator<Item = MoveOp> {
     #[auto_enum(Iterator)]
@@ -181,8 +181,9 @@ fn _organize(
         #[auto_enum(Iterator)]
         if count == 1 {
             files.into_iter().map(move |file| MoveOp {
-                to: prefix.join(format!(
-                    "{}{TAG_END}{}",
+                to: format!(
+                    "{}{}{TAG_END}{}",
+                    FmtPrefix(&prefix),
                     file.tags()
                         .filter(|tag| !tags.iter().map(|x| x.as_ref()).contains(tag))
                         .format_with("", |tag, f| {
@@ -191,7 +192,8 @@ fn _organize(
                             Ok(())
                         }),
                     file.name()
-                )),
+                )
+                .into(),
                 from: file.into(),
             })
         } else {
@@ -204,19 +206,16 @@ fn _organize(
                 // we could also check if count equals parent count,
                 // to avoid calling `partition`,
                 // but that would require tracking parent count.
-                let mut prefix = prefix.into_os_string();
-                prefix.push(String::from(INLINE_SEPARATOR));
-                prefix.push(tag.as_path());
                 Box::new(_organize(
                     with_tag,
-                    prefix.into(),
+                    format!("{}{tag}", FmtPrefixInline(&prefix)),
                     tags.iter().cloned().chain(once(tag)).collect(),
                 )) as Box<dyn Iterator<Item = _>>
             } else {
                 Box::new(
                     _organize(
                         with_tag,
-                        prefix.join(tag.as_path()),
+                        format!("{}{tag}", FmtPrefix(&prefix)),
                         tags.iter().cloned().chain(once(tag)).collect(),
                     )
                     .chain(_organize(without_tag, prefix, tags)),
@@ -225,9 +224,33 @@ fn _organize(
         }
     } else {
         files.into_iter().map(move |file| MoveOp {
-            to: prefix.join(format!("{TAG_END}{}", file.name())),
+            to: format!("{}{TAG_END}{}", FmtPrefix(&prefix), file.name()).into(),
             from: file.into(),
         })
+    }
+}
+
+struct FmtPrefix<'a>(&'a str);
+
+impl fmt::Display for FmtPrefix<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.0.is_empty() {
+            self.0.fmt(f)?;
+            DIR_SEPARATOR.fmt(f)?;
+        }
+        Ok(())
+    }
+}
+
+struct FmtPrefixInline<'a>(&'a str);
+
+impl fmt::Display for FmtPrefixInline<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.0.is_empty() {
+            self.0.fmt(f)?;
+            INLINE_SEPARATOR.fmt(f)?;
+        }
+        Ok(())
     }
 }
 
@@ -494,14 +517,28 @@ mod tests {
     #[test]
     fn organize_moves_files_into_optimal_tag_directories() {
         let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
-        for path in ["a/b/c/_foo", "a-b-_bar", "d/e-_baz", "🙂/🙁/_fez"] {
+        for path in ["a/b/c/_foo", "a-b-_bar", "d/e-_baz", "🙂/🙁/_fez", "_fiz"] {
             make_file_and_parent(&filesystem.fs, path);
         }
 
         filesystem.organize().unwrap();
         assert_eq!(
             list_files(&filesystem.fs),
-            ["a-b/_bar", "a-b/c-_foo", "d-e-_baz", "🙂-🙁-_fez"].map(PathBuf::from),
+            ["_fiz", "a-b/_bar", "a-b/c-_foo", "d-e-_baz", "🙂-🙁-_fez"].map(PathBuf::from),
+        )
+    }
+
+    #[test]
+    fn organize_moves_files_into_optimal_tag_directories_when_all_have_same_tags() {
+        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
+        for path in ["a-b-c-_bar", "a/b/c/_foo"] {
+            make_file_and_parent(&filesystem.fs, path);
+        }
+
+        filesystem.organize().unwrap();
+        assert_eq!(
+            list_files(&filesystem.fs),
+            ["a-b-c/_bar", "a-b-c/_foo"].map(PathBuf::from),
         )
     }
 
