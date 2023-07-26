@@ -581,13 +581,10 @@ mod tests {
 
     #[proptest(cases = 10, failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
     fn organize_is_idempotent(files: Vec<TaggedFile>) {
-        prop_assume!(files
-            .iter()
-            .map(|file| (file.tags().collect::<BTreeSet<_>>(), file.name()))
-            .all_unique());
+        prop_assume!(files.iter().map(TagSetTaggedFile::new).all_unique());
 
         let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
-        for file in files.into_iter().unique() {
+        for file in files.iter() {
             make_file_and_parent(&filesystem.fs, file.as_path());
         }
 
@@ -595,6 +592,26 @@ mod tests {
         let first_pass_files = list_files(&filesystem.fs);
         filesystem.organize().unwrap();
         prop_assert_eq!(list_files(&filesystem.fs), first_pass_files);
+    }
+
+    #[proptest(cases = 10, failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    fn organize_does_not_change_tags_or_names(files: Vec<TaggedFile>) {
+        prop_assume!(files.iter().map(TagSetTaggedFile::new).all_unique());
+
+        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
+        for file in files.iter() {
+            make_file_and_parent(&filesystem.fs, file.as_path());
+        }
+
+        filesystem.organize().unwrap();
+        let organized_files = list_files(&filesystem.fs)
+            .into_iter()
+            .map(|file| TaggedFile::from_path(file).unwrap())
+            .collect_vec();
+        prop_assert_eq!(
+            BTreeSet::from_iter(organized_files.iter().map(TagSetTaggedFile::new)),
+            BTreeSet::from_iter(files.iter().map(TagSetTaggedFile::new))
+        );
     }
 
     #[test]
@@ -606,6 +623,21 @@ mod tests {
             make_file_and_parent(&filesystem.fs, path);
         }
         assert!(filesystem.organize().is_err());
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    struct TagSetTaggedFile<'a> {
+        tags: BTreeSet<&'a TagRef>,
+        name: &'a str,
+    }
+
+    impl<'a> TagSetTaggedFile<'a> {
+        pub fn new(file: &'a TaggedFile) -> Self {
+            Self {
+                tags: file.tags().collect(),
+                name: file.name(),
+            }
+        }
     }
 
     fn make_file_and_parent<P>(fs: &FakeFileSystem, path: P)
@@ -620,10 +652,10 @@ mod tests {
     }
 
     fn list_files(fs: &FakeFileSystem) -> Vec<PathBuf> {
-        let mut dirs = vec!["".into()];
+        let mut dirs = vec![PathBuf::from("")];
         let mut files = Vec::new();
         while let Some(dir) = dirs.pop() {
-            if fs.read_dir(&dir).unwrap().next().is_none() {
+            if fs.read_dir(&dir).unwrap().next().is_none() && !dir.as_os_str().is_empty() {
                 files.push(dir);
             } else {
                 for file in fs.read_dir(dir).unwrap() {
