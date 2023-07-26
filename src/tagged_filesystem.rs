@@ -135,7 +135,22 @@ where
     {
         match op.into() {
             Op::EnsureDirectory(path) => self.fs.create_dir_all(path),
-            Op::Move(MoveOp { from, to }) => self.fs.rename(from, to),
+            Op::Move(MoveOp { from, to }) => {
+                // This utility should only organize data,
+                // never delete it.
+                if self.fs.is_file(&to) {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::AlreadyExists,
+                        format!(
+                            "cannot move `{}` to `{}`, destination already exists",
+                            from.display(),
+                            to.display()
+                        ),
+                    ))
+                } else {
+                    self.fs.rename(from, to)
+                }
+            }
             Op::DeleteDirectoryIfEmpty(path) => {
                 if self.fs.read_dir(&path)?.next().is_none() {
                     self.fs.remove_dir(path)
@@ -280,10 +295,10 @@ fn clean_move(op: MoveOp) -> impl Iterator<Item = Op> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{collections::BTreeSet, path::Path};
 
     use filesystem::FakeFileSystem;
-    use proptest::test_runner::FileFailurePersistence;
+    use proptest::{prelude::*, test_runner::FileFailurePersistence};
     use test_strategy::proptest;
 
     use crate::Tag;
@@ -454,10 +469,7 @@ mod tests {
 
         pre(&filesystem.fs);
 
-        if let Some(parent) = file.as_path().parent() {
-            filesystem.fs.create_dir_all(parent).unwrap();
-        }
-        filesystem.fs.create_file(&file, "").unwrap();
+        make_file_and_parent(&filesystem.fs, &file);
 
         assert!(filesystem.add_tag(&tag, file.clone()).is_ok());
 
@@ -481,25 +493,22 @@ mod tests {
 
     #[test]
     fn del_tag_moves_file_if_file_has_tag() {
+        test_del_tag("foo-_bar", "foo", "_bar");
+        test_del_tag("foo/_bar", "foo", "_bar");
+        test_del_tag("🙂/foo-_bar", "foo", "🙂/_bar");
+    }
+
+    fn test_del_tag(file: &str, tag: &str, expected: &str) {
         let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
+        let file = TaggedFile::new(file.to_owned()).unwrap();
+        let tag = Tag::new(tag.to_owned()).unwrap();
 
-        let tag = Tag::new("foo".to_owned()).unwrap();
-        let files = [
-            TaggedFile::new("foo-_bar".to_owned()).unwrap(),
-            TaggedFile::new("foo/_bar".to_owned()).unwrap(),
-            TaggedFile::new("🙂/foo-_bar".to_owned()).unwrap(),
-        ];
-        let destinations = ["_bar", "_bar", "🙂/_bar"];
+        make_file_and_parent(&filesystem.fs, &file);
 
-        filesystem.fs.create_dir("foo").unwrap();
-        for (file, dest) in files.into_iter().zip(destinations.into_iter()) {
-            make_file_and_parent(&filesystem.fs, &file);
+        assert!(filesystem.del_tag(&tag, file.clone()).is_ok());
 
-            assert!(filesystem.del_tag(&tag, file.clone()).is_ok());
-
-            assert!(filesystem.fs.is_file(dest));
-            assert!(!filesystem.fs.is_file(file));
-        }
+        assert!(filesystem.fs.is_file(expected));
+        assert!(!filesystem.fs.is_file(file));
     }
 
     #[test]
@@ -572,6 +581,11 @@ mod tests {
 
     #[proptest(cases = 10, failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
     fn organize_is_idempotent(files: Vec<TaggedFile>) {
+        prop_assume!(files
+            .iter()
+            .map(|file| (file.tags().collect::<BTreeSet<_>>(), file.name()))
+            .all_unique());
+
         let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
         for file in files.into_iter().unique() {
             make_file_and_parent(&filesystem.fs, file.as_path());
@@ -580,7 +594,18 @@ mod tests {
         filesystem.organize().unwrap();
         let first_pass_files = list_files(&filesystem.fs);
         filesystem.organize().unwrap();
-        assert_eq!(list_files(&filesystem.fs), first_pass_files);
+        prop_assert_eq!(list_files(&filesystem.fs), first_pass_files);
+    }
+
+    #[test]
+    fn organize_returns_err_if_files_have_same_tags_and_name() {
+        // These files cannot be organized
+        // without deleting one or the other.
+        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
+        for path in ["foo/_bar", "foo-_bar"] {
+            make_file_and_parent(&filesystem.fs, path);
+        }
+        assert!(filesystem.organize().is_err());
     }
 
     fn make_file_and_parent<P>(fs: &FakeFileSystem, path: P)
