@@ -14,7 +14,11 @@ pub struct TagRef(str);
 
 impl Tag {
     pub fn new(s: String) -> Option<Tag> {
-        if s.starts_with(TAG_END) || s.chars().any(|c| SEPARATORS.iter().any(|sep| &c == sep)) {
+        if s.starts_with(TAG_END)
+            || s.chars().any(|c| SEPARATORS.iter().any(|sep| &c == sep))
+            // Paths like `.` and `..` have special meanings in filesystems.
+            || s.chars().all(|c| c == '.')
+        {
             None
         } else {
             Some(Tag(s))
@@ -111,6 +115,11 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn new_returns_none_for_empty_strings() {
+        assert!(Tag::new(String::new()).is_none());
+    }
+
     #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
     fn new_returns_none_for_strings_starting_with_tag_end(
         #[strategy(STARTS_WITH_TAG_END_REGEX.as_str())] s: String,
@@ -126,12 +135,27 @@ mod tests {
     }
 
     #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
-    fn new_returns_some_for_valid_tags(#[strategy(TAG_REGEX.as_str())] s: String) {
-        prop_assert!(Tag::new(s).is_some());
+    fn new_returns_none_for_strings_containing_only_dot(#[strategy(r"\.+")] s: String) {
+        prop_assert!(Tag::new(s).is_none());
+    }
+
+    #[test]
+    fn new_returns_tag_for_valid_tags() {
+        test_new("foo");
+        test_new("bar");
+        test_new("🙂");
+        test_new(".x.");
+        test_new(".x");
+        test_new("x.");
+        test_new("has_underscore");
+    }
+
+    fn test_new(tag: &str) {
+        assert_eq!(Tag::new(tag.to_owned()).unwrap().to_string(), tag);
     }
 
     lazy_static! {
-        static ref STARTS_WITH_TAG_END_REGEX: String = format!(r"{}\PC*", TAG_END);
+        static ref STARTS_WITH_TAG_END_REGEX: String = format!(r"{TAG_END}\PC*");
         static ref TAG_WITH_SEP_REGEX: String = format!(r"\PC*[{}]\PC*", *SEPARATORS_STRING);
     }
 }

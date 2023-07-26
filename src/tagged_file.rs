@@ -119,13 +119,15 @@ impl TaggedFile {
     pub fn new(path: String) -> Result<TaggedFile, NewError> {
         let mut tags = Vec::new();
         let mut tag_start = 0;
+        let mut valid = false;
         for (i, c) in path.char_indices() {
             if SEPARATORS.contains(&c) {
-                if i == tag_start {
-                    return Err(NewError(path));
-                } else {
+                if valid {
                     tags.push(TagIndices(tag_start, i));
+                } else {
+                    return Err(NewError(path));
                 }
+                valid = false;
                 // Skip this separator
                 // for the start of the next tag.
                 tag_start = i + c.len_utf8();
@@ -136,6 +138,9 @@ impl TaggedFile {
                     path,
                     tags,
                 });
+            } else if c != '.' {
+                // A valid tag must have at least one non-'.' character.
+                valid = true;
             }
         }
         Err(NewError(path))
@@ -422,19 +427,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_returns_some_for_simple_tagged_files() {
+    fn new_returns_ok_for_simple_tagged_files() {
         assert!(TaggedFile::new("foo-bar-_baz".to_owned()).is_ok());
         assert!(TaggedFile::new("foo/bar/_baz".to_owned()).is_ok());
         assert!(TaggedFile::new("🙂/🙁-_baz".to_owned()).is_ok());
     }
 
     #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
-    fn new_returns_some_for_tagged_files(raw_file: RawTaggedFile) {
+    fn new_returns_ok_for_tagged_files(raw_file: RawTaggedFile) {
         prop_assert!(TaggedFile::new(raw_file.to_string()).is_ok());
     }
 
     #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
-    fn new_returns_none_for_non_tagged_files(s: String) {
+    fn new_returns_ok_for_non_tagged_files(s: String) {
         prop_assume!(
             !(s.starts_with(TAG_END)
                 || SEPARATORS
@@ -446,12 +451,20 @@ mod tests {
     }
 
     #[test]
-    fn new_returns_none_for_files_with_empty_tags() {
+    fn new_returns_err_for_files_with_empty_tags() {
         assert!(TaggedFile::new("-bar-_baz".to_owned()).is_err());
         assert!(TaggedFile::new("foo--_baz".to_owned()).is_err());
         assert!(TaggedFile::new("/bar-_baz".to_owned()).is_err());
         assert!(TaggedFile::new("foo/-_baz".to_owned()).is_err());
         assert!(TaggedFile::new("foo-/_baz".to_owned()).is_err());
+    }
+
+    #[test]
+    fn new_returns_err_for_all_dot_tags() {
+        assert!(TaggedFile::new(".-_baz".to_owned()).is_err());
+        assert!(TaggedFile::new("..-_baz".to_owned()).is_err());
+        assert!(TaggedFile::new("foo-.-_baz".to_owned()).is_err());
+        assert!(TaggedFile::new("foo-..-_baz".to_owned()).is_err());
     }
 
     #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
