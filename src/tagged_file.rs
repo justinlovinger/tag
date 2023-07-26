@@ -425,6 +425,7 @@ mod tests {
     fn new_returns_some_for_simple_tagged_files() {
         assert!(TaggedFile::new("foo-bar-_baz".to_owned()).is_ok());
         assert!(TaggedFile::new("foo/bar/_baz".to_owned()).is_ok());
+        assert!(TaggedFile::new("🙂/🙁-_baz".to_owned()).is_ok());
     }
 
     #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
@@ -482,6 +483,7 @@ mod tests {
     fn add_inline_tag_returns_path_with_tag_added() {
         test_add_inline_tag("foo-_bar", "baz", "foo-baz-_bar");
         test_add_inline_tag("foo/_bar", "baz", "foo/baz-_bar");
+        test_add_inline_tag("🙂/_bar", "🙁", "🙂/🙁-_bar");
     }
 
     fn test_add_inline_tag(file: &str, tag: &str, expected_to: &str) {
@@ -512,6 +514,7 @@ mod tests {
         test_del_tag("foo/baz-_bar", "foo", "baz-_bar");
         test_del_tag("foo-baz/_bar", "baz", "foo-_bar");
         test_del_tag("foo/baz/_bar", "baz", "foo/_bar");
+        test_del_tag("🙂/🙁-_bar", "🙁", "🙂/_bar");
     }
 
     fn test_del_tag(file: &str, tag: &str, expected_to: &str) {
@@ -540,6 +543,7 @@ mod tests {
         test_inline_tag("foo/_bar", "foo", "foo-_bar", "foo");
         test_inline_tag("foo/baz-_bar", "foo", "foo-baz-_bar", "foo");
         test_inline_tag("foo/baz/_bar", "baz", "foo/baz-_bar", "foo/baz");
+        test_inline_tag("🙂/🙁/_bar", "🙁", "🙂/🙁-_bar", "🙂/🙁");
     }
 
     fn test_inline_tag(file: &str, tag: &str, expected_to: &str, expected_del_dir: &str) {
@@ -632,6 +636,7 @@ mod tests {
         test_uninline_tag("foo-_bar", "foo", "foo/_bar", "foo");
         test_uninline_tag("foo-baz-_bar", "foo", "foo/baz-_bar", "foo");
         test_uninline_tag("foo/baz-_bar", "baz", "foo/baz/_bar", "foo/baz");
+        test_uninline_tag("🙂/🙁-_bar", "🙁", "🙂/🙁/_bar", "🙂/🙁");
     }
 
     fn test_uninline_tag(file: &str, tag: &str, expected_to: &str, expected_mk_dir: &str) {

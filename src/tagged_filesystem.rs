@@ -271,6 +271,7 @@ mod tests {
     fn add_tag_renames_file_if_file_does_not_have_tag() {
         test_add_tag(|_| {}, "foo-_bar", "baz", "foo-baz-_bar", |_| {});
         test_add_tag(|_| {}, "foo/_bar", "baz", "foo/baz-_bar", |_| {});
+        test_add_tag(|_| {}, "🙂/_bar", "🙁", "🙂/🙁-_bar", |_| {});
     }
 
     #[test]
@@ -294,6 +295,13 @@ mod tests {
             "a/_bar",
             "foo",
             "a/foo/_bar",
+            |_| {},
+        );
+        test_add_tag(
+            |fs| fs.create_dir_all("a/🙂").unwrap(),
+            "a/_bar",
+            "🙂",
+            "a/🙂/_bar",
             |_| {},
         );
     }
@@ -456,12 +464,13 @@ mod tests {
         let files = [
             TaggedFile::new("foo-_bar".to_owned()).unwrap(),
             TaggedFile::new("foo/_bar".to_owned()).unwrap(),
+            TaggedFile::new("🙂/foo-_bar".to_owned()).unwrap(),
         ];
-        let destinations = ["_bar", "_bar"];
+        let destinations = ["_bar", "_bar", "🙂/_bar"];
 
         filesystem.fs.create_dir("foo").unwrap();
         for (file, dest) in files.into_iter().zip(destinations.into_iter()) {
-            filesystem.fs.create_file(&file, "").unwrap();
+            make_file_and_parent(&filesystem.fs, &file);
 
             assert!(filesystem.del_tag(&tag, file.clone()).is_ok());
 
@@ -485,14 +494,14 @@ mod tests {
     #[test]
     fn organize_moves_files_into_optimal_tag_directories() {
         let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
-        for path in ["a/b/c/_foo", "a-b-_bar", "d/e-_baz"] {
+        for path in ["a/b/c/_foo", "a-b-_bar", "d/e-_baz", "🙂/🙁/_fez"] {
             make_file_and_parent(&filesystem.fs, path);
         }
 
         filesystem.organize().unwrap();
         assert_eq!(
             list_files(&filesystem.fs),
-            ["a-b/_bar", "a-b/c-_foo", "d-e-_baz"].map(PathBuf::from),
+            ["a-b/_bar", "a-b/c-_foo", "d-e-_baz", "🙂-🙁-_fez"].map(PathBuf::from),
         )
     }
 
