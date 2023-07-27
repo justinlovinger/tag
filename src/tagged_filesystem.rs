@@ -1,4 +1,4 @@
-use std::{fmt, iter::once, path::PathBuf};
+use std::{collections::BTreeSet, fmt, iter::once, path::PathBuf};
 
 use auto_enums::auto_enum;
 use filesystem::{DirEntry, FileSystem};
@@ -87,10 +87,9 @@ where
     pub fn organize(&self) -> std::io::Result<()> {
         let files = self.find_tagged_files("".into())?;
         let ops = _organize(files, String::new(), Vec::new());
-        self.apply_all(
-            ops.filter(|MoveOp { from, to }| from != to)
-                .flat_map(clean_move),
-        )?;
+        self.apply_all(from_move_ops(
+            ops.filter(|MoveOp { from, to }| from != to).collect(),
+        ))?;
         Ok(())
     }
 
@@ -117,12 +116,6 @@ where
     where
         O: Into<Op>,
     {
-        // Note:
-        // the application of sequences of operations can be optimized
-        // by making directories first,
-        // moving files next,
-        // and deleting directories last,
-        // while squashing duplicate operations to make or delete directories.
         for op in ops {
             self.apply(op)?
         }
@@ -269,28 +262,53 @@ impl fmt::Display for FmtPrefixInline<'_> {
     }
 }
 
-fn clean_move(op: MoveOp) -> impl Iterator<Item = Op> {
-    let (ensure_dir, del_dirs) = match (op.from.parent(), op.to.parent()) {
-        (Some(from), Some(to)) => (|| {
-            let mut del_dirs = Vec::new();
-            for path in from.ancestors() {
-                if path == to {
-                    return (None, del_dirs);
-                } else {
-                    del_dirs.push(path.to_owned())
-                }
-            }
-            (Some(to.to_owned()), del_dirs)
-        })(),
-        (Some(from), None) => (None, Vec::from_iter(from.ancestors().map(|x| x.to_owned()))),
-        (None, Some(to)) => (Some(to.to_owned()), Vec::new()),
-        (None, None) => (None, Vec::new()),
-    };
-    ensure_dir
+fn from_move_ops(ops: Vec<MoveOp>) -> impl Iterator<Item = Op> {
+    // We know a directory exists
+    // if a file is moving from it.
+    let from_ancestors = BTreeSet::from_iter(
+        ops.iter()
+            .flat_map(|MoveOp { from, to: _ }| from.ancestors().skip(1)),
+    );
+    let ensure_dirs = BTreeSet::from_iter(
+        ops.iter()
+            .filter_map(|MoveOp { from: _, to }| to.parent())
+            .filter(|to| !from_ancestors.contains(to)),
+    );
+    // We do not need to ensure a parent exists
+    // if its child is already being ensured.
+    let ensure_dir_ancestors =
+        BTreeSet::from_iter(ensure_dirs.iter().flat_map(|path| path.ancestors().skip(1)));
+    let ensure_dirs = BTreeSet::from_iter(
+        ensure_dirs
+            .into_iter()
+            .filter(|to| !ensure_dir_ancestors.contains(to))
+            .map(|x| x.to_owned()),
+    );
+
+    // We know a directory will not be empty
+    // if a file is moving to it.
+    let to_ancestors = BTreeSet::from_iter(
+        ops.iter()
+            .flat_map(|MoveOp { from: _, to }| to.ancestors().skip(1)),
+    );
+    let del_dirs = BTreeSet::from_iter(
+        ops.iter()
+            .flat_map(|MoveOp { from, to: _ }| {
+                // If a child will not be empty,
+                // neither will its parents.
+                from.ancestors()
+                    .skip(1)
+                    .take_while(|from| !to_ancestors.contains(from))
+            })
+            .map(|x| x.to_owned()),
+    );
+
+    ensure_dirs
         .into_iter()
         .map(Op::EnsureDirectory)
-        .chain(once(Op::Move(op)))
-        .chain(del_dirs.into_iter().map(Op::DeleteDirectoryIfEmpty))
+        .chain(ops.into_iter().map_into())
+        // `rev()` to check child directories before parents.
+        .chain(del_dirs.into_iter().rev().map(Op::DeleteDirectoryIfEmpty))
 }
 
 #[cfg(test)]
