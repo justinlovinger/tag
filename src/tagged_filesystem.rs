@@ -1,4 +1,9 @@
-use std::{collections::BTreeSet, fmt, iter::once, path::PathBuf};
+use std::{
+    collections::BTreeSet,
+    fmt,
+    iter::once,
+    path::{Path, PathBuf},
+};
 
 use auto_enums::auto_enum;
 use filesystem::{DirEntry, FileSystem};
@@ -79,21 +84,29 @@ where
                 return Ok(());
             }
 
-            for other_file in self.fs.read_dir(parent)? {
-                if let Ok(other_file) = TaggedFile::from_path(other_file?.path()) {
-                    if other_file.tags().any(|x| x == tag.as_ref()) {
-                        self.apply_all(
-                            other_file
-                                .uninline_tag(tag)
-                                .expect("other file should have tag inline")
-                                .chain(once(Op::Move(MoveOp {
-                                    to: to_path,
-                                    from: file.into(),
-                                }))),
-                        )?;
-                        return Ok(());
+            if let Some(other_file) = (|| -> std::io::Result<_> {
+                for other_file in self.sane_read_dir(parent)? {
+                    if let Ok(other_file) = TaggedFile::from_path(other_file?) {
+                        if other_file.tags().any(|x| x == tag.as_ref()) {
+                            return Ok(Some(other_file));
+                        }
                     }
                 }
+                Ok(None)
+            })()? {
+                self.apply_all(
+                    other_file
+                        .uninline_tag(tag)
+                        .expect("other file should have tag inline")
+                        .chain(once(
+                            MoveOp {
+                                to: to_path,
+                                from: file.into(),
+                            }
+                            .into(),
+                        )),
+                )?;
+                return Ok(());
             }
         }
 
@@ -122,8 +135,8 @@ where
         let mut dirs = vec![root];
         let mut files = Vec::new();
         while let Some(dir) = dirs.pop() {
-            for file in self.fs.read_dir(dir)? {
-                match TaggedFile::from_path(file?.path()) {
+            for file in self.sane_read_dir(dir)? {
+                match TaggedFile::from_path(file?) {
                     Ok(x) => files.push(x),
                     Err(x) => {
                         let x = x.into_path();
@@ -184,7 +197,7 @@ where
                     println!("Deleting directory `{path:?}` if empty");
                 }
 
-                if self.fs.read_dir(&path)?.next().is_none() {
+                if self.sane_read_dir(&path)?.next().is_none() {
                     self.fs.remove_dir(path)
                 } else {
                     Ok(())
@@ -203,6 +216,33 @@ where
                 // ```
             }
         }
+    }
+
+    // The rust standard library has unexpected behavior for `std::io::read_dir("")`,
+    // see <https://github.com/rust-lang/rust/issues/114149>.
+    #[auto_enum]
+    fn sane_read_dir<P>(
+        &self,
+        path: P,
+    ) -> std::io::Result<impl Iterator<Item = std::io::Result<PathBuf>> + 'static>
+    where
+        P: AsRef<Path>,
+    {
+        let path = path.as_ref();
+        #[auto_enum(Iterator)]
+        let it = if path.as_os_str().is_empty() {
+            self.fs.read_dir(".")?.map(|res| {
+                res.map(|x| {
+                    x.path()
+                        .strip_prefix("./")
+                        .expect("file from `.` should start with `./`")
+                        .to_owned()
+                })
+            })
+        } else {
+            self.fs.read_dir(path)?.map(|res| res.map(|x| x.path()))
+        };
+        Ok(it)
     }
 }
 
