@@ -270,27 +270,27 @@ impl fmt::Display for FmtPrefixInline<'_> {
 }
 
 fn clean_move(op: MoveOp) -> impl Iterator<Item = Op> {
-    // Note,
-    // we can do better
-    // by comparing parents of `to` and `from`.
-    let ensure_dir = Vec::from_iter(
-        op.to
-            .parent()
-            .into_iter()
-            .map(|x| x.to_owned())
-            .map(Op::EnsureDirectory),
-    );
-    let del_dirs = Vec::from_iter(
-        op.from
-            .ancestors()
-            .skip(1)
-            .map(|x| x.to_owned())
-            .map(Op::DeleteDirectoryIfEmpty),
-    );
+    let (ensure_dir, del_dirs) = match (op.from.parent(), op.to.parent()) {
+        (Some(from), Some(to)) => (|| {
+            let mut del_dirs = Vec::new();
+            for path in from.ancestors() {
+                if path == to {
+                    return (None, del_dirs);
+                } else {
+                    del_dirs.push(path.to_owned())
+                }
+            }
+            (Some(to.to_owned()), del_dirs)
+        })(),
+        (Some(from), None) => (None, Vec::from_iter(from.ancestors().map(|x| x.to_owned()))),
+        (None, Some(to)) => (Some(to.to_owned()), Vec::new()),
+        (None, None) => (None, Vec::new()),
+    };
     ensure_dir
         .into_iter()
+        .map(Op::EnsureDirectory)
         .chain(once(Op::Move(op)))
-        .chain(del_dirs)
+        .chain(del_dirs.into_iter().map(Op::DeleteDirectoryIfEmpty))
 }
 
 #[cfg(test)]
