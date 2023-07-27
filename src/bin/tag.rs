@@ -1,12 +1,17 @@
 use clap::{Parser, Subcommand};
 use filesystem::OsFileSystem;
 use tag::{
-    AddError, DelError, Tag, TaggedFile, TaggedFilesystem, DIR_SEPARATOR, INLINE_SEPARATOR, TAG_END,
+    AddError, DelError, Tag, TaggedFile, TaggedFilesystemBuilder, DIR_SEPARATOR, INLINE_SEPARATOR,
+    TAG_END,
 };
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
+    /// Print operations taken by the program
+    #[arg(short, long)]
+    verbose: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -60,7 +65,9 @@ fn tagged_file_parser(s: &str) -> Result<TaggedFile, String> {
 fn main() -> std::io::Result<()> {
     let args = Args::parse();
 
-    let filesystem = TaggedFilesystem::new(OsFileSystem::new());
+    let filesystem = TaggedFilesystemBuilder::new(OsFileSystem::new())
+        .verbose(args.verbose)
+        .build();
     match args.command {
         Some(Commands::Add { tag, files }) => {
             for file in files {

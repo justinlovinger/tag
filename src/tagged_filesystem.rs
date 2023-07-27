@@ -10,8 +10,15 @@ use crate::{
 };
 
 #[derive(Debug)]
+pub struct TaggedFilesystemBuilder<F> {
+    fs: F,
+    verbose: bool,
+}
+
+#[derive(Debug)]
 pub struct TaggedFilesystem<F> {
     fs: F,
+    verbose: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -26,12 +33,30 @@ pub enum DelError<T> {
     FilesystemError(#[from] std::io::Error),
 }
 
+impl<F> TaggedFilesystemBuilder<F> {
+    pub fn new(fs: F) -> Self {
+        Self { fs, verbose: false }
+    }
+
+    pub fn verbose(mut self, value: bool) -> Self {
+        self.verbose = value;
+        self
+    }
+
+    pub fn build(self) -> TaggedFilesystem<F> {
+        TaggedFilesystem {
+            fs: self.fs,
+            verbose: self.verbose,
+        }
+    }
+}
+
 impl<F> TaggedFilesystem<F>
 where
     F: FileSystem + 'static,
 {
     pub fn new(fs: F) -> Self {
-        Self { fs }
+        Self { fs, verbose: false }
     }
 
     pub fn add_tag<T>(&self, tag: T, file: TaggedFile) -> Result<(), AddError<T>>
@@ -127,8 +152,18 @@ where
         O: Into<Op>,
     {
         match op.into() {
-            Op::EnsureDirectory(path) => self.fs.create_dir_all(path),
+            Op::EnsureDirectory(path) => {
+                if self.verbose {
+                    println!("Ensuring directory `{path:?}` exists");
+                }
+
+                self.fs.create_dir_all(path)
+            }
             Op::Move(MoveOp { from, to }) => {
+                if self.verbose {
+                    println!("Moving `{from:?}` to `{to:?}`");
+                }
+
                 // This utility should only organize data,
                 // never delete it.
                 if self.fs.is_file(&to) {
@@ -145,6 +180,10 @@ where
                 }
             }
             Op::DeleteDirectoryIfEmpty(path) => {
+                if self.verbose {
+                    println!("Deleting directory `{path:?}` if empty");
+                }
+
                 if self.fs.read_dir(&path)?.next().is_none() {
                     self.fs.remove_dir(path)
                 } else {
