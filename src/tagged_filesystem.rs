@@ -17,12 +17,14 @@ use crate::{
 #[derive(Debug)]
 pub struct TaggedFilesystemBuilder<F> {
     fs: F,
+    dry_run: bool,
     verbose: bool,
 }
 
 #[derive(Debug)]
 pub struct TaggedFilesystem<F> {
     fs: F,
+    dry_run: bool,
     verbose: bool,
 }
 
@@ -40,7 +42,16 @@ pub enum DelError<T> {
 
 impl<F> TaggedFilesystemBuilder<F> {
     pub fn new(fs: F) -> Self {
-        Self { fs, verbose: false }
+        Self {
+            fs,
+            dry_run: false,
+            verbose: false,
+        }
+    }
+
+    pub fn dry_run(mut self, value: bool) -> Self {
+        self.dry_run = value;
+        self
     }
 
     pub fn verbose(mut self, value: bool) -> Self {
@@ -51,6 +62,7 @@ impl<F> TaggedFilesystemBuilder<F> {
     pub fn build(self) -> TaggedFilesystem<F> {
         TaggedFilesystem {
             fs: self.fs,
+            dry_run: self.dry_run,
             verbose: self.verbose,
         }
     }
@@ -61,7 +73,11 @@ where
     F: FileSystem + 'static,
 {
     pub fn new(fs: F) -> Self {
-        Self { fs, verbose: false }
+        Self {
+            fs,
+            dry_run: false,
+            verbose: false,
+        }
     }
 
     pub fn add_tag<T>(&self, tag: T, file: TaggedFile) -> Result<(), AddError<T>>
@@ -170,7 +186,11 @@ where
                     println!("Ensuring directory `{}` exists", path.display());
                 }
 
-                self.fs.create_dir_all(path)
+                if self.dry_run {
+                    Ok(())
+                } else {
+                    self.fs.create_dir_all(path)
+                }
             }
             Op::Move(MoveOp { from, to }) => {
                 if self.verbose {
@@ -188,6 +208,8 @@ where
                             to.display()
                         ),
                     ))
+                } else if self.dry_run {
+                    Ok(())
                 } else {
                     self.fs.rename(from, to)
                 }
@@ -197,23 +219,23 @@ where
                     println!("Deleting directory `{}` if empty", path.display());
                 }
 
-                if self.sane_read_dir(&path)?.next().is_none() {
-                    self.fs.remove_dir(path)
-                } else {
-                    Ok(())
-                }
-
                 // Note,
                 // we can do the following with nightly Rust,
-                // which may be more efficient:
+                // which may be more efficient than `self.sane_read_dir(&path)?.next().is_none()`:
                 // ```
                 // if let Err(e) = self.fs.remove_dir(path) {
                 //     if e.kind() != std::io::ErrorKind::DirectoryNotEmpty {
                 //         return Err(e);
                 //     }
-                // };
-                // Ok(())
+                // }
                 // ```
+                if self.dry_run {
+                    Ok(())
+                } else if self.sane_read_dir(&path)?.next().is_none() {
+                    self.fs.remove_dir(path)
+                } else {
+                    Ok(())
+                }
             }
         }
     }
