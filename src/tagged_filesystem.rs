@@ -167,14 +167,14 @@ where
         match op.into() {
             Op::EnsureDirectory(path) => {
                 if self.verbose {
-                    println!("Ensuring directory `{path:?}` exists");
+                    println!("Ensuring directory `{}` exists", path.display());
                 }
 
                 self.fs.create_dir_all(path)
             }
             Op::Move(MoveOp { from, to }) => {
                 if self.verbose {
-                    println!("Moving `{from:?}` to `{to:?}`");
+                    println!("Moving `{}` to `{}`", from.display(), to.display());
                 }
 
                 // This utility should only organize data,
@@ -194,7 +194,7 @@ where
             }
             Op::DeleteDirectoryIfEmpty(path) => {
                 if self.verbose {
-                    println!("Deleting directory `{path:?}` if empty");
+                    println!("Deleting directory `{}` if empty", path.display());
                 }
 
                 if self.sane_read_dir(&path)?.next().is_none() {
