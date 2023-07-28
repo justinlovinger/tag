@@ -1,11 +1,8 @@
 use std::{
     fmt,
     hash::Hash,
-    iter::once,
     path::{Path, PathBuf},
 };
-
-use auto_enums::auto_enum;
 
 use crate::{TagRef, DIR_SEPARATOR, INLINE_SEPARATOR, SEPARATORS, TAG_END};
 
@@ -59,22 +56,9 @@ impl From<TagIndices> for SliceIndices {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Op {
-    EnsureDirectory(PathBuf),
-    Move(MoveOp),
-    DeleteDirectoryIfEmpty(PathBuf),
-}
-
-#[derive(Clone, Debug, PartialEq)]
 pub struct MoveOp {
     pub from: PathBuf,
     pub to: PathBuf,
-}
-
-impl From<MoveOp> for Op {
-    fn from(value: MoveOp) -> Self {
-        Op::Move(value)
-    }
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
@@ -200,14 +184,14 @@ impl TaggedFile {
         self.path.as_ref()
     }
 
-    pub fn add_inline_tag<T>(self, tag: T) -> Result<impl Iterator<Item = Op>, HasTagError<T>>
+    pub fn add_inline_tag<T>(self, tag: T) -> Result<MoveOp, HasTagError<T>>
     where
         T: AsRef<TagRef>,
     {
         if self.tags().any(|x| x == tag.as_ref()) {
             Err(HasTagError(self, tag))
         } else {
-            Ok(once(Op::Move(MoveOp {
+            Ok(MoveOp {
                 to: format!(
                     "{}{}{}{}{}",
                     self.tags_str(),
@@ -218,92 +202,50 @@ impl TaggedFile {
                 )
                 .into(),
                 from: self.into(),
-            })))
+            })
         }
     }
 
-    pub fn del_tag<T>(self, tag: T) -> Result<impl Iterator<Item = Op>, LacksTagError<T>>
+    pub fn del_tag<T>(self, tag: T) -> Result<MoveOp, LacksTagError<T>>
     where
         T: AsRef<TagRef>,
     {
         let x = self.indices_of(&tag);
         match x {
-            Some(x) => Ok(once(Op::Move(MoveOp {
+            Some(x) => Ok(MoveOp {
                 to: format!("{}{}", self.path_up_to(x), self.path_after(x)).into(),
                 from: self.into(),
-            }))),
+            }),
             None => Err(LacksTagError(self, tag)),
         }
     }
 
-    #[auto_enum]
-    pub fn inline_tag<T>(self, tag: T) -> Result<impl Iterator<Item = Op>, InlineTagError<T>>
+    pub fn inline_tag<T>(self, tag: T) -> Result<MoveOp, InlineTagError<T>>
     where
         T: AsRef<TagRef>,
     {
-        let tag_indices = self.indices_of(&tag);
-        match tag_indices {
+        match self.indices_of(&tag) {
             Some(tag_indices) => {
                 if self.separator_of(tag_indices) == INLINE_SEPARATOR {
-                    return Err(AlreadyInlineError(self, tag).into());
-                }
-
-                let dir = self.path_up_to_including(tag_indices).to_owned();
-                let remaining_path = self.path_after(tag_indices);
-                let to_path = format!("{}{}{}", dir, INLINE_SEPARATOR, remaining_path);
-
-                Ok(
-                    #[auto_enum(Iterator)]
-                    match remaining_path.find(DIR_SEPARATOR).map(|mut next_dir| {
-                        // We add the length of everything before `remaining_path`
-                        // so index refers to original string.
-                        // We will add the length of the separator later
-                        // because it depends on which string we slice.
-                        next_dir += dir.as_bytes().len();
-                        (
-                            // These are safe
-                            // assuming we correctly constructed `next_dir` above.
-                            Op::EnsureDirectory(
-                                unsafe {
-                                    to_path.get_unchecked(..next_dir + INLINE_SEPARATOR.len_utf8())
-                                }
-                                .into(),
-                            ),
-                            Op::DeleteDirectoryIfEmpty(
-                                unsafe {
-                                    self.path
-                                        .get_unchecked(..next_dir + DIR_SEPARATOR.len_utf8())
-                                }
-                                .into(),
-                            ),
+                    Err(AlreadyInlineError(self, tag).into())
+                } else {
+                    Ok(MoveOp {
+                        to: format!(
+                            "{}{}{}",
+                            self.path_up_to_including(tag_indices),
+                            INLINE_SEPARATOR,
+                            self.path_after(tag_indices),
                         )
-                    }) {
-                        Some((pre_move, pre_del)) => [
-                            pre_move,
-                            Op::Move(MoveOp {
-                                from: self.into(),
-                                to: to_path.into(),
-                            }),
-                            pre_del,
-                            Op::DeleteDirectoryIfEmpty(dir.into()),
-                        ]
-                        .into_iter(),
-                        None => [
-                            Op::Move(MoveOp {
-                                from: self.into(),
-                                to: to_path.into(),
-                            }),
-                            Op::DeleteDirectoryIfEmpty(dir.into()),
-                        ]
-                        .into_iter(),
-                    },
-                )
+                        .into(),
+                        from: self.into(),
+                    })
+                }
             }
             None => Err(LacksTagError(self, tag).into()),
         }
     }
 
-    pub fn uninline_tag<T>(self, tag: T) -> Result<impl Iterator<Item = Op>, UninlineTagError<T>>
+    pub fn uninline_tag<T>(self, tag: T) -> Result<MoveOp, UninlineTagError<T>>
     where
         T: AsRef<TagRef>,
     {
@@ -311,21 +253,19 @@ impl TaggedFile {
         match tag_indices {
             Some(tag_indices) => {
                 if self.separator_of(tag_indices) == DIR_SEPARATOR {
-                    return Err(AlreadyUninlineError(self, tag).into());
-                }
-
-                let dir = self.path_up_to_including(tag_indices);
-                let remaining_path = self.path_after(tag_indices);
-                let to_path = format!("{}{}{}", dir, DIR_SEPARATOR, remaining_path);
-
-                Ok([
-                    Op::EnsureDirectory(dir.into()),
-                    Op::Move(MoveOp {
+                    Err(AlreadyUninlineError(self, tag).into())
+                } else {
+                    Ok(MoveOp {
+                        to: format!(
+                            "{}{}{}",
+                            self.path_up_to_including(tag_indices),
+                            DIR_SEPARATOR,
+                            self.path_after(tag_indices),
+                        )
+                        .into(),
                         from: self.into(),
-                        to: to_path.into(),
-                    }),
-                ]
-                .into_iter())
+                    })
+                }
             }
             None => Err(LacksTagError(self, tag).into()),
         }
@@ -530,12 +470,11 @@ mod tests {
         assert_eq!(
             TaggedFile::new(file.to_owned())
                 .unwrap()
-                .add_inline_tag(Tag::new(tag.to_owned()).unwrap())
-                .map(Vec::from_iter),
-            Ok(vec![Op::Move(MoveOp {
+                .add_inline_tag(Tag::new(tag.to_owned()).unwrap()),
+            Ok(MoveOp {
                 from: file.into(),
                 to: expected_to.into()
-            })])
+            })
         );
     }
 
@@ -561,12 +500,11 @@ mod tests {
         assert_eq!(
             TaggedFile::new(file.to_owned())
                 .unwrap()
-                .del_tag(Tag::new(tag.to_owned()).unwrap())
-                .map(Vec::from_iter),
-            Ok(vec![Op::Move(MoveOp {
+                .del_tag(Tag::new(tag.to_owned()).unwrap()),
+            Ok(MoveOp {
                 from: file.into(),
                 to: expected_to.into()
-            })])
+            })
         );
     }
 
@@ -580,78 +518,21 @@ mod tests {
 
     #[test]
     fn inline_tag_returns_path_with_tag_inline() {
-        test_inline_tag("foo/_bar", "foo", "foo-_bar", "foo");
-        test_inline_tag("foo/baz-_bar", "foo", "foo-baz-_bar", "foo");
-        test_inline_tag("foo/baz/_bar", "baz", "foo/baz-_bar", "foo/baz");
-        test_inline_tag("🙂/🙁/_bar", "🙁", "🙂/🙁-_bar", "🙂/🙁");
+        test_inline_tag("foo/_bar", "foo", "foo-_bar");
+        test_inline_tag("foo/baz-_bar", "foo", "foo-baz-_bar");
+        test_inline_tag("foo/baz/_bar", "baz", "foo/baz-_bar");
+        test_inline_tag("🙂/🙁/_bar", "🙁", "🙂/🙁-_bar");
     }
 
-    fn test_inline_tag(file: &str, tag: &str, expected_to: &str, expected_del_dir: &str) {
+    fn test_inline_tag(file: &str, tag: &str, expected_to: &str) {
         assert_eq!(
             TaggedFile::new(file.to_owned())
                 .unwrap()
-                .inline_tag(Tag::new(tag.to_owned()).unwrap())
-                .map(Vec::from_iter),
-            Ok(vec![
-                Op::Move(MoveOp {
-                    from: file.into(),
-                    to: expected_to.into()
-                }),
-                Op::DeleteDirectoryIfEmpty(expected_del_dir.into()),
-            ])
-        );
-    }
-
-    #[test]
-    fn inline_tag_ensures_directory_exists_if_directory_tags_are_merged() {
-        test_inline_tag_with_ensure_dir(
-            "foo/baz/_bar",
-            "foo",
-            "foo-baz",
-            "foo-baz/_bar",
-            ["foo/baz", "foo"],
-        );
-        test_inline_tag_with_ensure_dir(
-            "a/foo/baz/_bar",
-            "foo",
-            "a/foo-baz",
-            "a/foo-baz/_bar",
-            ["a/foo/baz", "a/foo"],
-        );
-        // Note,
-        // this should also delete tag-directories in next directory:
-        // ```
-        // test_inline_tag_with_ensure_dir(
-        //     "a/foo/baz/b/_bar",
-        //     "foo",
-        //     "a/foo-baz/b",
-        //     "a/foo-baz/b/_bar",
-        //     ["a/foo/baz/b", "a/foo/baz", "a/foo"],
-        // );
-        // ```
-    }
-
-    fn test_inline_tag_with_ensure_dir(
-        file: &str,
-        tag: &str,
-        expected_ensure_dir: &str,
-        expected_to: &str,
-        expected_del_dir: [&str; 2],
-    ) {
-        assert_eq!(
-            TaggedFile::new(file.to_owned())
-                .unwrap()
-                .inline_tag(Tag::new(tag.to_owned()).unwrap())
-                .map(Vec::from_iter),
-            Ok(vec![
-                Op::EnsureDirectory(expected_ensure_dir.into()),
-                Op::Move(MoveOp {
-                    from: file.into(),
-                    to: expected_to.into()
-                }),
-                Op::DeleteDirectoryIfEmpty(expected_del_dir[0].into()),
-                Op::DeleteDirectoryIfEmpty(expected_del_dir[1].into()),
-            ])
+                .inline_tag(Tag::new(tag.to_owned()).unwrap()),
+            Ok(MoveOp {
+                from: file.into(),
+                to: expected_to.into()
+            })
         );
     }
 
@@ -673,25 +554,21 @@ mod tests {
 
     #[test]
     fn uninline_tag_returns_path_with_tag_as_dir() {
-        test_uninline_tag("foo-_bar", "foo", "foo/_bar", "foo");
-        test_uninline_tag("foo-baz-_bar", "foo", "foo/baz-_bar", "foo");
-        test_uninline_tag("foo/baz-_bar", "baz", "foo/baz/_bar", "foo/baz");
-        test_uninline_tag("🙂/🙁-_bar", "🙁", "🙂/🙁/_bar", "🙂/🙁");
+        test_uninline_tag("foo-_bar", "foo", "foo/_bar");
+        test_uninline_tag("foo-baz-_bar", "foo", "foo/baz-_bar");
+        test_uninline_tag("foo/baz-_bar", "baz", "foo/baz/_bar");
+        test_uninline_tag("🙂/🙁-_bar", "🙁", "🙂/🙁/_bar");
     }
 
-    fn test_uninline_tag(file: &str, tag: &str, expected_to: &str, expected_mk_dir: &str) {
+    fn test_uninline_tag(file: &str, tag: &str, expected_to: &str) {
         assert_eq!(
             TaggedFile::new(file.to_owned())
                 .unwrap()
-                .uninline_tag(Tag::new(tag.to_owned()).unwrap())
-                .map(Vec::from_iter),
-            Ok(vec![
-                Op::EnsureDirectory(expected_mk_dir.into()),
-                Op::Move(MoveOp {
-                    from: file.into(),
-                    to: expected_to.into()
-                }),
-            ])
+                .uninline_tag(Tag::new(tag.to_owned()).unwrap()),
+            Ok(MoveOp {
+                from: file.into(),
+                to: expected_to.into()
+            })
         );
     }
 

@@ -10,7 +10,7 @@ use filesystem::{DirEntry, FileSystem};
 use itertools::Itertools;
 
 use crate::{
-    tagged_file::{HasTagError, LacksTagError, MoveOp, Op},
+    tagged_file::{HasTagError, LacksTagError, MoveOp},
     Tag, TagRef, TaggedFile, DIR_SEPARATOR, INLINE_SEPARATOR, TAG_END,
 };
 
@@ -26,6 +26,19 @@ pub struct TaggedFilesystem<F> {
     fs: F,
     dry_run: bool,
     verbose: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Op {
+    EnsureDirectory(PathBuf),
+    Move(MoveOp),
+    DeleteDirectoryIfEmpty(PathBuf),
+}
+
+impl From<MoveOp> for Op {
+    fn from(value: MoveOp) -> Self {
+        Op::Move(value)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -110,23 +123,20 @@ where
                 }
                 Ok(None)
             })()? {
-                self.apply_all(
+                self.apply_all(from_move_ops(vec![
                     other_file
                         .uninline_tag(tag)
-                        .expect("other file should have tag inline")
-                        .chain(once(
-                            MoveOp {
-                                to: to_path,
-                                from: file.into(),
-                            }
-                            .into(),
-                        )),
-                )?;
+                        .expect("other file should have tag inline"),
+                    MoveOp {
+                        to: to_path,
+                        from: file.into(),
+                    },
+                ]))?;
                 return Ok(());
             }
         }
 
-        self.apply_all(file.add_inline_tag(tag)?)?;
+        self.apply(file.add_inline_tag(tag)?)?;
         Ok(())
     }
 
@@ -134,7 +144,7 @@ where
     where
         T: AsRef<TagRef>,
     {
-        self.apply_all(file.del_tag(tag)?)?;
+        self.apply_all(from_move_ops(vec![file.del_tag(tag)?]))?;
         Ok(())
     }
 
