@@ -150,7 +150,7 @@ where
 
     pub fn organize(&self) -> std::io::Result<()> {
         let files = self.find_tagged_files("".into())?;
-        let ops = _organize(files, String::new(), Vec::new());
+        let ops = _organize(files, String::new(), Vec::new(), 0);
         self.apply_all(from_move_ops(
             ops.filter(|MoveOp { from, to }| from != to).collect(),
         ))?;
@@ -283,6 +283,7 @@ fn _organize(
     files: Vec<TaggedFile>,
     prefix: String,
     tags: Vec<Tag>,
+    parent_count: usize,
 ) -> impl Iterator<Item = MoveOp> {
     #[auto_enum(Iterator)]
     if let Some((tag, count)) = files
@@ -290,11 +291,12 @@ fn _organize(
         .flat_map(|file| file.tags())
         .counts()
         .into_iter()
-        .filter(|(k, _)| !tags.iter().map(|x| x.as_ref()).contains(k))
-        .max_by(|(xk, xv), (yk, yv)| {
-            xv.cmp(yv)
-                .then_with(|| xk.len().cmp(&yk.len()))
-                .then_with(|| xk.cmp(yk).reverse())
+        .filter(|(tag, _)| !tags.iter().map(|x| x.as_ref()).contains(tag))
+        .max_by(|(tag, count), (other_tag, other_count)| {
+            count
+                .cmp(other_count)
+                .then_with(|| tag.len().cmp(&other_tag.len()))
+                .then_with(|| tag.cmp(other_tag).reverse())
         })
     {
         #[auto_enum(Iterator)]
@@ -315,31 +317,28 @@ fn _organize(
                 .into(),
                 from: file.into(),
             })
+        } else if count == parent_count {
+            let tag = tag.to_owned();
+            Box::new(_organize(
+                files,
+                format!("{}{tag}", FmtPrefixInline(&prefix)),
+                tags.into_iter().chain(once(tag)).collect(),
+                count,
+            )) as Box<dyn Iterator<Item = _>>
         } else {
             let tag = tag.to_owned();
             let (with_tag, without_tag) = files
                 .into_iter()
                 .partition::<Vec<_>, _>(|file| file.tags().contains(&tag.as_ref()));
-            if without_tag.is_empty() {
-                // Note,
-                // we could also check if count equals parent count,
-                // to avoid calling `partition`,
-                // but that would require tracking parent count.
-                Box::new(_organize(
+            Box::new(
+                _organize(
                     with_tag,
-                    format!("{}{tag}", FmtPrefixInline(&prefix)),
+                    format!("{}{tag}", FmtPrefix(&prefix)),
                     tags.iter().cloned().chain(once(tag)).collect(),
-                )) as Box<dyn Iterator<Item = _>>
-            } else {
-                Box::new(
-                    _organize(
-                        with_tag,
-                        format!("{}{tag}", FmtPrefix(&prefix)),
-                        tags.iter().cloned().chain(once(tag)).collect(),
-                    )
-                    .chain(_organize(without_tag, prefix, tags)),
-                ) as Box<dyn Iterator<Item = _>>
-            }
+                    count,
+                )
+                .chain(_organize(without_tag, prefix, tags, parent_count)),
+            ) as Box<dyn Iterator<Item = _>>
         }
     } else {
         files.into_iter().map(move |file| MoveOp {
@@ -424,13 +423,16 @@ fn from_move_ops(ops: Vec<MoveOp>) -> impl Iterator<Item = Op> {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeSet, path::Path};
+    use std::collections::BTreeSet;
 
     use filesystem::FakeFileSystem;
     use proptest::{prelude::*, test_runner::FileFailurePersistence};
     use test_strategy::proptest;
 
-    use crate::Tag;
+    use crate::{
+        testing::{make_file_and_parent, TagSetTaggedFile},
+        Tag,
+    };
 
     use super::*;
 
@@ -708,30 +710,20 @@ mod tests {
         )
     }
 
-    #[proptest(cases = 10, failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
-    fn organize_is_idempotent(files: Vec<TaggedFile>) {
-        prop_assume!(files.iter().map(TagSetTaggedFile::new).all_unique());
-
-        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
-        for file in files.iter() {
-            make_file_and_parent(&filesystem.fs, file.as_path());
-        }
-
+    #[proptest(cases = 20, failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    fn organize_is_idempotent(filesystem: TaggedFilesystem<FakeFileSystem>) {
         filesystem.organize().unwrap();
         let first_pass_files = list_files(&filesystem.fs);
         filesystem.organize().unwrap();
         prop_assert_eq!(list_files(&filesystem.fs), first_pass_files);
     }
 
-    #[proptest(cases = 10, failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
-    fn organize_does_not_change_tags_or_names(files: Vec<TaggedFile>) {
-        prop_assume!(files.iter().map(TagSetTaggedFile::new).all_unique());
-
-        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
-        for file in files.iter() {
-            make_file_and_parent(&filesystem.fs, file.as_path());
-        }
-
+    #[proptest(cases = 20, failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    fn organize_does_not_change_tags_or_names(filesystem: TaggedFilesystem<FakeFileSystem>) {
+        let files = list_files(&filesystem.fs)
+            .into_iter()
+            .map(|file| TaggedFile::from_path(file).unwrap())
+            .collect_vec();
         filesystem.organize().unwrap();
         let organized_files = list_files(&filesystem.fs)
             .into_iter()
@@ -741,6 +733,43 @@ mod tests {
             BTreeSet::from_iter(organized_files.iter().map(TagSetTaggedFile::new)),
             BTreeSet::from_iter(files.iter().map(TagSetTaggedFile::new))
         );
+    }
+
+    #[proptest(cases = 20, failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    fn organize_results_in_unique_tags_in_directories(
+        filesystem: TaggedFilesystem<FakeFileSystem>,
+    ) {
+        filesystem.organize().unwrap();
+
+        for dir in list_dirs(&filesystem.fs) {
+            for (x, y) in filesystem
+                .fs
+                .read_dir(dir)
+                .unwrap()
+                .filter_map(|x| x.unwrap().path().file_name().map(|x| x.to_os_string()))
+                .map(|name| {
+                    // Tags within a dir will not be split by `/`.
+                    let name = name.into_string().unwrap();
+                    match TaggedFile::new(name) {
+                        Ok(file) => file.tags().map(|x| x.to_owned()).collect_vec(),
+                        Err(e) => e
+                            .into_string()
+                            .split('-')
+                            .map(|x| Tag::new(x.to_owned()).unwrap())
+                            .collect_vec(),
+                    }
+                })
+                .collect_vec()
+                .into_iter()
+                .tuple_combinations()
+            {
+                for tag in &x {
+                    for other in &y {
+                        prop_assert_ne!(tag, other);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -754,43 +783,17 @@ mod tests {
         assert!(filesystem.organize().is_err());
     }
 
-    #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    struct TagSetTaggedFile<'a> {
-        tags: BTreeSet<&'a TagRef>,
-        name: &'a str,
-    }
-
-    impl<'a> TagSetTaggedFile<'a> {
-        pub fn new(file: &'a TaggedFile) -> Self {
-            Self {
-                tags: file.tags().collect(),
-                name: file.name(),
-            }
-        }
-    }
-
-    fn make_file_and_parent<P>(fs: &FakeFileSystem, path: P)
-    where
-        P: AsRef<Path>,
-    {
-        let path = path.as_ref();
-        if let Some(parent) = path.parent() {
-            fs.create_dir_all(parent).unwrap();
-        }
-        fs.create_file(path, "").unwrap();
-    }
-
     fn list_files(fs: &FakeFileSystem) -> Vec<PathBuf> {
-        let mut dirs = vec![PathBuf::from("")];
+        let mut queue = vec![PathBuf::from("")];
         let mut files = Vec::new();
-        while let Some(dir) = dirs.pop() {
+        while let Some(dir) = queue.pop() {
             if fs.read_dir(&dir).unwrap().next().is_none() && !dir.as_os_str().is_empty() {
                 files.push(dir);
             } else {
                 for file in fs.read_dir(dir).unwrap() {
                     let file = file.unwrap().path();
                     if fs.is_dir(&file) {
-                        dirs.push(file);
+                        queue.push(file);
                     } else {
                         files.push(file);
                     }
@@ -799,5 +802,21 @@ mod tests {
         }
         files.sort();
         files
+    }
+
+    fn list_dirs(fs: &FakeFileSystem) -> Vec<PathBuf> {
+        let mut queue = vec![PathBuf::from("")];
+        let mut dirs = queue.clone();
+        while let Some(dir) = queue.pop() {
+            for file in fs.read_dir(dir).unwrap() {
+                let file = file.unwrap().path();
+                if fs.is_dir(&file) {
+                    queue.push(file.clone());
+                    dirs.push(file);
+                }
+            }
+        }
+        dirs.sort();
+        dirs
     }
 }

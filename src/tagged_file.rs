@@ -69,6 +69,10 @@ impl NewError {
     pub fn into_path(self) -> PathBuf {
         self.0.into()
     }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
