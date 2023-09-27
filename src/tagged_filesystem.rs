@@ -10,7 +10,8 @@ use itertools::Itertools;
 
 use crate::{
     organize::organize,
-    tagged_file::{HasTagError, LacksTagError, MoveOp},
+    tagged_file::{HasTagError, LacksTagError},
+    types::MoveOp,
     TagRef, TaggedFile,
 };
 
@@ -29,7 +30,7 @@ pub struct TaggedFilesystem<F> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Op {
+enum Op {
     EnsureDirectory(PathBuf),
     Move(MoveOp),
     DeleteDirectoryIfEmpty(PathBuf),

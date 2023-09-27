@@ -3,7 +3,7 @@ use std::{fmt, iter::once};
 use auto_enums::auto_enum;
 use itertools::Itertools;
 
-use crate::{tagged_file::MoveOp, Tag, TaggedFile, DIR_SEPARATOR, INLINE_SEPARATOR, TAG_END};
+use crate::{types::MoveOp, Tag, TaggedFile, DIR_SEPARATOR, INLINE_SEPARATOR, TAG_END};
 
 pub fn organize(files: Vec<TaggedFile>) -> impl Iterator<Item = MoveOp> {
     _organize(files, String::new(), Vec::new(), 0)

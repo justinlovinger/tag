@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{TagRef, DIR_SEPARATOR, INLINE_SEPARATOR, SEPARATORS, TAG_END};
+use crate::{types::MoveOp, TagRef, DIR_SEPARATOR, INLINE_SEPARATOR, SEPARATORS, TAG_END};
 
 #[derive(Clone, Debug)]
 pub struct TaggedFile {
@@ -53,12 +53,6 @@ impl From<TagIndices> for SliceIndices {
     fn from(value: TagIndices) -> Self {
         SliceIndices(value.0, value.1)
     }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct MoveOp {
-    pub from: PathBuf,
-    pub to: PathBuf,
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
@@ -188,7 +182,7 @@ impl TaggedFile {
         self.path.as_ref()
     }
 
-    pub fn add_inline_tag<T>(self, tag: T) -> Result<MoveOp, HasTagError<T>>
+    pub(crate) fn add_inline_tag<T>(self, tag: T) -> Result<MoveOp, HasTagError<T>>
     where
         T: AsRef<TagRef>,
     {
@@ -210,7 +204,7 @@ impl TaggedFile {
         }
     }
 
-    pub fn del_tag<T>(self, tag: T) -> Result<MoveOp, LacksTagError<T>>
+    pub(crate) fn del_tag<T>(self, tag: T) -> Result<MoveOp, LacksTagError<T>>
     where
         T: AsRef<TagRef>,
     {
@@ -224,7 +218,8 @@ impl TaggedFile {
         }
     }
 
-    pub fn inline_tag<T>(self, tag: T) -> Result<MoveOp, InlineTagError<T>>
+    #[allow(dead_code)]
+    pub(crate) fn inline_tag<T>(self, tag: T) -> Result<MoveOp, InlineTagError<T>>
     where
         T: AsRef<TagRef>,
     {
@@ -249,7 +244,7 @@ impl TaggedFile {
         }
     }
 
-    pub fn uninline_tag<T>(self, tag: T) -> Result<MoveOp, UninlineTagError<T>>
+    pub(crate) fn uninline_tag<T>(self, tag: T) -> Result<MoveOp, UninlineTagError<T>>
     where
         T: AsRef<TagRef>,
     {

@@ -2,6 +2,7 @@ mod organize;
 mod tag;
 mod tagged_file;
 mod tagged_filesystem;
+mod types;
 
 #[cfg(test)]
 mod testing;
