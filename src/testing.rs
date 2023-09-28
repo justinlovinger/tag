@@ -14,8 +14,11 @@ lazy_static! {
     pub static ref SEPARATORS_STRING: String = SEPARATORS.iter().collect();
     static ref SEPARATORS_AND_ENDS: String = format!("{}{TAG_END}", *SEPARATORS_STRING);
     static ref SEPARATOR_REGEX: String = format!("[{}]", *SEPARATORS_STRING);
-    static ref TAG_REGEX: String = format!("[^{}][^{}]*", *SEPARATORS_AND_ENDS, *SEPARATORS_STRING);
-    static ref NAME_REGEX: String = format!("[^{DIR_SEPARATOR}]*");
+    static ref TAG_REGEX: String = format!(
+        "[^{}][^{}]{{0,16}}",
+        *SEPARATORS_AND_ENDS, *SEPARATORS_STRING
+    );
+    static ref NAME_REGEX: String = format!("[^{DIR_SEPARATOR}]{{0,16}}");
 }
 
 impl Arbitrary for TaggedFilesystem<FakeFileSystem> {
