@@ -377,7 +377,7 @@ impl AsRef<str> for TaggedFile {
 
 #[cfg(test)]
 mod tests {
-    use proptest::{prelude::*, test_runner::FileFailurePersistence};
+    use proptest::prelude::*;
     use test_strategy::proptest;
 
     use crate::{testing::*, Tag};
@@ -391,12 +391,12 @@ mod tests {
         assert!(TaggedFile::new("🙂/🙁-_baz".to_owned()).is_ok());
     }
 
-    #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    #[proptest]
     fn new_returns_ok_for_tagged_files(raw_file: RawTaggedFile) {
         prop_assert!(TaggedFile::new(raw_file.to_string()).is_ok());
     }
 
-    #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    #[proptest]
     fn new_returns_ok_for_non_tagged_files(s: String) {
         prop_assume!(
             !(s.starts_with(TAG_END)
@@ -433,19 +433,19 @@ mod tests {
         assert!(TaggedFile::new("bar/foo-foo/_baz".to_owned()).is_err());
     }
 
-    #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    #[proptest]
     fn name_returns_name(raw_file: RawTaggedFile) {
         let file = TaggedFile::new(raw_file.to_string()).unwrap();
         prop_assert_eq!(file.name(), raw_file.name);
     }
 
-    #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    #[proptest]
     fn tags_returns_all_tags(raw_file: RawTaggedFile) {
         let file = TaggedFile::new(raw_file.to_string()).unwrap();
         prop_assert_eq!(file.tags().collect::<Vec<_>>(), raw_file.tags);
     }
 
-    #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    #[proptest]
     fn tags_str_returns_string_of_all_tags_with_separators(raw_file: RawTaggedFile) {
         let file = TaggedFile::new(raw_file.to_string()).unwrap();
         let path = raw_file.to_string();

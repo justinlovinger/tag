@@ -334,7 +334,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use filesystem::FakeFileSystem;
-    use proptest::{prelude::*, test_runner::FileFailurePersistence};
+    use proptest::prelude::*;
     use test_strategy::proptest;
 
     use crate::{
@@ -618,7 +618,7 @@ mod tests {
         )
     }
 
-    #[proptest(cases = 20, failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    #[proptest(cases = 20)]
     fn organize_is_idempotent(filesystem: TaggedFilesystem<FakeFileSystem>) {
         filesystem.organize().unwrap();
         let first_pass_files = list_files(&filesystem.fs);
@@ -626,7 +626,7 @@ mod tests {
         prop_assert_eq!(list_files(&filesystem.fs), first_pass_files);
     }
 
-    #[proptest(cases = 20, failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    #[proptest(cases = 20)]
     fn organize_does_not_change_tags_or_names(filesystem: TaggedFilesystem<FakeFileSystem>) {
         let files = list_files(&filesystem.fs)
             .into_iter()
@@ -643,7 +643,7 @@ mod tests {
         );
     }
 
-    #[proptest(cases = 20, failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    #[proptest(cases = 20)]
     fn organize_results_in_unique_tags_in_directories(
         filesystem: TaggedFilesystem<FakeFileSystem>,
     ) {

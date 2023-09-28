@@ -27,6 +27,7 @@
             rustPackages.clippy
           ];
           RUST_SRC_PATH = rustPlatform.rustLibSrc;
+          PROPTEST_DISABLE_FAILURE_PERSISTENCE = 1;
         };
     });
 }
