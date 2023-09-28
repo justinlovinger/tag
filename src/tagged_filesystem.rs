@@ -572,7 +572,7 @@ mod tests {
         filesystem.organize().unwrap();
         assert_eq!(
             list_files(&filesystem.fs),
-            ["_fiz", "a-b/_bar", "a-b/c-_foo", "d-e-_baz", "🙂-🙁-_fez"].map(PathBuf::from),
+            ["_fiz", "a-b/_bar", "a-b/c-_foo", "d-e-_baz", "🙁-🙂-_fez"].map(PathBuf::from),
         )
     }
 
