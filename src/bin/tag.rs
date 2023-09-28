@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
 use filesystem::OsFileSystem;
 use tag::{
@@ -42,7 +44,7 @@ enum Commands {
         #[clap(required = true, value_name = "FILE", value_parser = tagged_file_parser)]
         files: Vec<TaggedFile>,
     },
-    /// Organize all tagged files under the current working directory
+    /// Organize all tagged files under the given directory
     ///
     /// Tags are split into directories,
     /// most frequent first.
@@ -51,7 +53,11 @@ enum Commands {
     /// Unique tags are inlined.
     ///
     /// Untagged files are not changed.
-    Organize,
+    Organize {
+        /// Directory to organize
+        #[arg(default_value = ".")]
+        path: PathBuf,
+    },
 }
 
 fn tag_parser(s: &str) -> Result<Tag, String> {
@@ -92,7 +98,10 @@ fn main() -> std::io::Result<()> {
                 }
             }
         }
-        Some(Commands::Organize) => filesystem.organize()?,
+        Some(Commands::Organize { path }) => {
+            std::env::set_current_dir(path)?;
+            filesystem.organize()?
+        }
         None => (),
     }
 
