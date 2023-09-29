@@ -12,7 +12,6 @@ derive_more = "0.99.17"
 filesystem = "0.4.4"
 itertools = "0.11.0"
 ref-cast = "1.0.14"
-smallvec = "1.11.1"
 thiserror = "1.0.43"
 
 [dev-dependencies]

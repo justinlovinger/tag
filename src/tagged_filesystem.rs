@@ -593,14 +593,14 @@ mod tests {
     #[test]
     fn organize_breaks_ties_in_favor_of_increasing_length() {
         let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
-        for path in ["a/bb/_foo", "bb/_bar", "a/_baz"] {
+        for path in ["a/bb/_1", "bb/_2", "a/_3", "dd-ccc-_4"] {
             make_file_and_parent(&filesystem.fs, path);
         }
 
         filesystem.organize().unwrap();
         assert_eq!(
             list_files(&filesystem.fs),
-            ["a-_baz", "bb/_bar", "bb/a-_foo"].map(PathBuf::from),
+            ["a-_3", "bb/_2", "bb/a-_1", "ccc-dd-_4"].map(PathBuf::from),
         )
     }
 
