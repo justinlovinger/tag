@@ -152,7 +152,7 @@ where
     pub fn organize(&self) -> std::io::Result<()> {
         let files = self.find_tagged_files("".into())?;
         self.apply_all(from_move_ops(
-            organize(files)
+            organize(&files)
                 .filter(|MoveOp { from, to }| from != to)
                 .collect(),
         ))?;
