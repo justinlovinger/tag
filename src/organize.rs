@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use auto_enums::auto_enum;
 use itertools::Itertools;
@@ -7,7 +7,11 @@ use crate::{types::MoveOp, TagRef, TaggedFile, DIR_SEPARATOR, INLINE_SEPARATOR, 
 
 pub fn organize(files: &[TaggedFile]) -> impl Iterator<Item = MoveOp> + '_ {
     let mut tags_files: TagsFiles = HashMap::new();
-    for file in files {
+    for file in files.iter().enumerate().map(|(i, file)| {
+        // This is safe
+        // because every `i` is unique.
+        unsafe { WithID::new(file, i) }
+    }) {
         for tag in file.tags() {
             tags_files.entry(tag).or_default().insert(file);
         }
@@ -109,10 +113,7 @@ fn organize_singleton_tags(
         })
 }
 
-fn to_move_ops<'a>(
-    files: impl IntoIterator<Item = &'a TaggedFile> + 'a,
-    prefix: String,
-) -> impl Iterator<Item = MoveOp> + 'a {
+fn to_move_ops(files: UntaggedFiles, prefix: String) -> impl Iterator<Item = MoveOp> + '_ {
     files.into_iter().map(move |file| MoveOp {
         to: format!("{}{TAG_END}{}", &prefix, file.name()).into(),
         from: file.as_path().into(),
@@ -142,13 +143,15 @@ fn tag_to_split<'a>(tags_files: &'a TagsFiles) -> Option<(&'a TagRef, usize)> {
         .map(|(tag, count)| (*tag, count))
 }
 
-type TagsFiles<'a> = HashMap<&'a TagRef, BTreeSet<&'a TaggedFile>>;
-
 #[derive(Debug)]
 struct Files<'a> {
     tags_files: TagsFiles<'a>,
-    untagged_files: Vec<&'a TaggedFile>,
+    untagged_files: UntaggedFiles<'a>,
 }
+
+type TagsFiles<'a> = HashMap<&'a TagRef, HashSet<WithID<&'a TaggedFile>>>;
+
+type UntaggedFiles<'a> = Vec<WithID<&'a TaggedFile>>;
 
 impl<'a> Files<'a> {
     /// Return (with_tag, without_tag).
@@ -165,7 +168,7 @@ impl<'a> Files<'a> {
                     if self_tag_files.len() == 1 {
                         self.tags_files.remove(tag);
                     } else {
-                        self_tag_files.remove(file);
+                        self_tag_files.remove(&file);
                     }
                 }
             }
@@ -180,5 +183,49 @@ impl<'a> Files<'a> {
             },
             self,
         )
+    }
+}
+
+/// More efficiently hash and compare
+/// when given unique IDs.
+#[derive(Clone, Copy, Debug)]
+struct WithID<T> {
+    inner: T,
+    id: usize,
+}
+
+impl<T> Eq for WithID<T> {}
+
+impl<T> PartialEq for WithID<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id.eq(&other.id)
+    }
+}
+
+impl<T> std::hash::Hash for WithID<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state)
+    }
+}
+
+impl<T> AsRef<T> for WithID<T> {
+    fn as_ref(&self) -> &T {
+        &self.inner
+    }
+}
+
+impl<T> std::ops::Deref for WithID<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T> WithID<T> {
+    /// This function is safe
+    /// when given a unique ID.
+    pub unsafe fn new(inner: T, id: usize) -> Self {
+        Self { inner, id }
     }
 }
