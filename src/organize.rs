@@ -113,6 +113,7 @@ fn to_move_ops(files: Files, prefix: Prefix) -> impl Iterator<Item = MoveOp> + '
                 from: file.as_path().into(),
             }
         }))
+        .filter(|MoveOp { from, to }| from != to)
 }
 
 fn tag_to_split<'a>(tags_files: &'a TagsFiles) -> Option<(&'a TagRef, usize)> {
