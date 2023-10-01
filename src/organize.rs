@@ -1,9 +1,14 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 
 use itertools::Itertools;
 use smallvec::SmallVec;
 
-use crate::{types::MoveOp, TagRef, TaggedFile, DIR_SEPARATOR, INLINE_SEPARATOR, TAG_END};
+use crate::{types::MoveOp, Tag, TagRef, TaggedFile, DIR_SEPARATOR, INLINE_SEPARATOR, TAG_END};
+
+type Prefix = Vec<(Rc<Tag>, usize)>; // (tag, count)
 
 pub fn organize(files: &[TaggedFile]) -> impl Iterator<Item = MoveOp> + '_ {
     let mut tags_files: TagsFiles = HashMap::new();
@@ -22,49 +27,65 @@ pub fn organize(files: &[TaggedFile]) -> impl Iterator<Item = MoveOp> + '_ {
             tags_files,
             untagged_files: Vec::new(), // Files with no tags will never move.
         },
-        String::new(),
-        0,
+        Default::default(),
     )
 }
 
-fn _organize(
-    mut files: Files,
-    prefix: String,
-    parent_count: usize,
-) -> impl Iterator<Item = MoveOp> + '_ {
+fn _organize(mut files: Files, prefix: Prefix) -> impl Iterator<Item = MoveOp> + '_ {
     let mut moves = Vec::new();
     loop {
         if let Some((tag, count)) = tag_to_split(&files.tags_files) {
             debug_assert_ne!(count, 0);
+
             let tag = tag.to_owned();
             let (with_tag, without_tag) = files.partition(&tag);
+            files = without_tag;
+
             moves.extend(_organize(
                 with_tag,
-                if parent_count == 0 {
-                    format!("{}{tag}", &prefix)
-                } else if count == parent_count {
-                    format!("{}{INLINE_SEPARATOR}{tag}", &prefix)
-                } else {
-                    format!("{}{DIR_SEPARATOR}{tag}", &prefix)
-                },
-                count,
+                prefix
+                    .iter()
+                    .cloned()
+                    .chain([(Rc::new(tag), count)])
+                    .collect(),
             ));
-            files = without_tag;
         } else {
             debug_assert_eq!(files.tags_files.len(), 0);
-            return moves
-                .into_iter()
-                .chain(to_move_ops(files, final_prefix(prefix, parent_count)));
+            return moves.into_iter().chain(to_move_ops(files, prefix));
         }
     }
 }
 
-fn to_move_ops(files: Files, prefix: String) -> impl Iterator<Item = MoveOp> + '_ {
+fn to_move_ops(files: Files, prefix: Prefix) -> impl Iterator<Item = MoveOp> + '_ {
+    let separators = prefix
+        .iter()
+        .map(|(_, count)| count)
+        .tuple_windows()
+        .map(|(count, next_count)| {
+            if count == next_count {
+                INLINE_SEPARATOR
+            } else {
+                DIR_SEPARATOR
+            }
+        })
+        .chain([DIR_SEPARATOR]);
+    let prefix = Rc::new(format!(
+        "{}",
+        prefix
+            .iter()
+            .map(|(tag, _)| tag)
+            .zip(separators)
+            .format_with("", |(tag, sep), f| {
+                f(&tag)?;
+                f(&sep)?;
+                Ok(())
+            }),
+    ));
     files
         .untagged_files
         .into_iter()
         .map({
-            let prefix = prefix.clone();
+            let prefix = Rc::clone(&prefix);
             move |file| MoveOp {
                 to: format!("{}{TAG_END}{}", &prefix, file.name()).into(),
                 from: file.as_path().into(),
@@ -92,16 +113,6 @@ fn to_move_ops(files: Files, prefix: String) -> impl Iterator<Item = MoveOp> + '
                 from: file.as_path().into(),
             }
         }))
-}
-
-fn final_prefix(prefix: impl std::fmt::Display, parent_count: usize) -> String {
-    if parent_count == 0 {
-        prefix.to_string()
-    } else if parent_count == 1 {
-        format!("{}{INLINE_SEPARATOR}", prefix)
-    } else {
-        format!("{}{DIR_SEPARATOR}", prefix)
-    }
 }
 
 fn tag_to_split<'a>(tags_files: &'a TagsFiles) -> Option<(&'a TagRef, usize)> {
