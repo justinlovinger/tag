@@ -83,10 +83,7 @@ fn to_move_ops(files: Files, prefix: Prefix) -> impl Iterator<Item = MoveOp> + '
         .into_iter()
         .map({
             let prefix = Rc::clone(&prefix);
-            move |file| MoveOp {
-                to: format!("{}{TAG_END}{}", &prefix, file.name()).into(),
-                from: file.as_path().into(),
-            }
+            move |file| (format!("{}{TAG_END}{}", &prefix, file.name()).into(), file)
         })
         .chain(files.inline_tags.into_iter().map(move |(file, mut tags)| {
             tags.sort_unstable_by(|tag, other| {
@@ -95,8 +92,8 @@ fn to_move_ops(files: Files, prefix: Prefix) -> impl Iterator<Item = MoveOp> + '
                     .reverse()
                     .then_with(|| tag.cmp(other))
             });
-            MoveOp {
-                to: format!(
+            (
+                format!(
                     "{}{}{TAG_END}{}",
                     &prefix,
                     tags.into_iter().format_with("", |tag, f| {
@@ -107,10 +104,14 @@ fn to_move_ops(files: Files, prefix: Prefix) -> impl Iterator<Item = MoveOp> + '
                     file.name()
                 )
                 .into(),
-                from: file.as_path().into(),
-            }
+                file,
+            )
         }))
-        .filter(|MoveOp { from, to }| from != to)
+        .filter(|(to, file)| file.as_path() != to)
+        .map(|(to, file)| MoveOp {
+            to,
+            from: file.as_path().into(),
+        })
 }
 
 fn tag_to_split<'a>(tags_files: &'a TagsFiles) -> Option<(&'a TagRef, usize)> {
