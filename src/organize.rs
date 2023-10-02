@@ -3,6 +3,7 @@ use std::{
     rc::Rc,
 };
 
+use by_address::ByThinAddress;
 use itertools::Itertools;
 use smallvec::SmallVec;
 
@@ -12,11 +13,7 @@ type Prefix = Vec<(Rc<Tag>, usize)>; // (tag, count)
 
 pub fn organize(files: &[TaggedFile]) -> impl Iterator<Item = MoveOp> + '_ {
     let mut tags_files: TagsFiles = HashMap::new();
-    for file in files.iter().enumerate().map(|(i, file)| {
-        // This is safe
-        // because every `i` is unique.
-        unsafe { WithID::new(file, i) }
-    }) {
+    for file in files.iter().map(ByThinAddress) {
         for tag in file.tags() {
             tags_files.entry(tag).or_default().insert(file);
         }
@@ -136,11 +133,11 @@ struct Files<'a> {
     inline_tags: InlineTags<'a>,
 }
 
-type TagsFiles<'a> = HashMap<&'a TagRef, HashSet<WithID<&'a TaggedFile>>>;
+type TagsFiles<'a> = HashMap<&'a TagRef, HashSet<ByThinAddress<&'a TaggedFile>>>;
 
-type UntaggedFiles<'a> = Vec<WithID<&'a TaggedFile>>;
+type UntaggedFiles<'a> = Vec<ByThinAddress<&'a TaggedFile>>;
 
-type InlineTags<'a> = HashMap<WithID<&'a TaggedFile>, SmallVec<[&'a TagRef; 1]>>;
+type InlineTags<'a> = HashMap<ByThinAddress<&'a TaggedFile>, SmallVec<[&'a TagRef; 1]>>;
 
 impl<'a> Files<'a> {
     /// Return (with_tag, without_tag).
@@ -202,48 +199,4 @@ fn extract_inline_tags_into<'a>(tags_files: &mut TagsFiles<'a>, inline_tags: &mu
             true
         }
     });
-}
-
-/// More efficiently hash and compare
-/// when given unique IDs.
-#[derive(Clone, Copy, Debug)]
-struct WithID<T> {
-    inner: T,
-    id: usize,
-}
-
-impl<T> Eq for WithID<T> {}
-
-impl<T> PartialEq for WithID<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.id.eq(&other.id)
-    }
-}
-
-impl<T> std::hash::Hash for WithID<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state)
-    }
-}
-
-impl<T> AsRef<T> for WithID<T> {
-    fn as_ref(&self) -> &T {
-        &self.inner
-    }
-}
-
-impl<T> std::ops::Deref for WithID<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<T> WithID<T> {
-    /// This function is safe
-    /// when given a unique ID.
-    pub unsafe fn new(inner: T, id: usize) -> Self {
-        Self { inner, id }
-    }
 }
