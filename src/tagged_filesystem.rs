@@ -330,11 +330,11 @@ mod tests {
     use std::collections::BTreeSet;
 
     use filesystem::FakeFileSystem;
-    use proptest::prelude::*;
+    use proptest::prelude::{prop::collection::vec, *};
     use test_strategy::proptest;
 
     use crate::{
-        testing::{make_file_and_parent, TagSetTaggedFile},
+        testing::{make_file_and_parent, tagged_files_strategy, TagSetTaggedFile},
         Tag,
     };
 
@@ -612,6 +612,44 @@ mod tests {
             list_files(&filesystem.fs),
             ["a/not-tagged", "a-_foo"].map(PathBuf::from),
         )
+    }
+
+    #[proptest(cases = 20)]
+    fn organize_ignores_nested_tagged_files(
+        #[strategy(
+            tagged_files_strategy(10, 10, 10)
+                .prop_flat_map(|files| {
+                    (
+                        vec(tagged_files_strategy(10, 10, 10),
+                        files.len()), Just(files)
+                    )
+                })
+                .prop_map(|(x, y)| (y, x))
+        )]
+        args: (Vec<TaggedFile>, Vec<Vec<TaggedFile>>),
+    ) {
+        let (dirs, dir_files) = args;
+
+        let fs = FakeFileSystem::new();
+        for dir in dirs.iter() {
+            fs.create_dir_all(dir.as_path()).unwrap();
+        }
+        let filesystem = TaggedFilesystem::new(fs);
+
+        filesystem.organize().unwrap();
+        for (dir, files) in list_dirs(&filesystem.fs)
+            .into_iter()
+            .filter_map(|path| TaggedFile::from_path(path).ok())
+            .zip(dir_files)
+        {
+            for file in files {
+                make_file_and_parent(&filesystem.fs, dir.as_path().join(file.as_path()))
+            }
+        }
+        let files = list_files(&filesystem.fs);
+
+        filesystem.organize().unwrap();
+        prop_assert_eq!(files, list_files(&filesystem.fs))
     }
 
     #[proptest(cases = 20)]

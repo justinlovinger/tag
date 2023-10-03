@@ -26,55 +26,61 @@ impl Arbitrary for TaggedFilesystem<FakeFileSystem> {
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        const MAX_TAG_SET_SIZE: usize = 100;
-        const MAX_TAGS: usize = 10;
-        const MAX_FILES: usize = 100;
-        btree_set(Tag::arbitrary(), 1..=MAX_TAG_SET_SIZE)
-            .prop_map(|set| set.into_iter().collect_vec())
-            .prop_flat_map(|tags| {
-                vec(
-                    // We use a `vec` instead of a `btree_set`
-                    // because we want these unsorted.
-                    vec(0..tags.len(), 0..=MAX_TAGS)
-                        .prop_map(move |indices| {
-                            indices
-                                .into_iter()
-                                .unique()
-                                .map(|i| tags[i].clone())
-                                .collect_vec()
-                        })
-                        .prop_flat_map(|tags| {
-                            (
-                                NAME_REGEX.as_str(),
-                                vec(SEPARATOR_REGEX.as_str(), tags.len()).prop_map(|xs| {
-                                    xs.into_iter()
-                                        .map(|s| s.chars().next().expect("at least one character"))
-                                        .collect()
-                                }),
-                            )
-                                .prop_map(move |(name, seps)| {
-                                    TaggedFile::from(RawTaggedFile {
-                                        name,
-                                        tags: tags.clone(),
-                                        seps,
-                                    })
-                                })
-                        }),
-                    0..=MAX_FILES,
-                )
-                .prop_filter("duplicate files", |files| {
-                    files.iter().map(TagSetTaggedFile::new).all_unique()
-                })
-                .prop_map(|files| {
-                    let fs = FakeFileSystem::new();
-                    for file in files.iter() {
-                        make_file_and_parent(&fs, file.as_path());
-                    }
-                    TaggedFilesystem::new(fs)
-                })
+        tagged_files_strategy(100, 10, 100)
+            .prop_map(|files| {
+                let fs = FakeFileSystem::new();
+                for file in files.iter() {
+                    make_file_and_parent(&fs, file.as_path());
+                }
+                TaggedFilesystem::new(fs)
             })
             .boxed()
     }
+}
+
+pub fn tagged_files_strategy(
+    max_tag_set_size: usize,
+    max_tags: usize,
+    max_files: usize,
+) -> BoxedStrategy<Vec<TaggedFile>> {
+    btree_set(Tag::arbitrary(), 1..=max_tag_set_size)
+        .prop_map(|set| set.into_iter().collect_vec())
+        .prop_flat_map(move |tags| {
+            vec(
+                // We use a `vec` instead of a `btree_set`
+                // because we want these unsorted.
+                vec(0..tags.len(), 0..=max_tags)
+                    .prop_map(move |indices| {
+                        indices
+                            .into_iter()
+                            .unique()
+                            .map(|i| tags[i].clone())
+                            .collect_vec()
+                    })
+                    .prop_flat_map(|tags| {
+                        (
+                            NAME_REGEX.as_str(),
+                            vec(SEPARATOR_REGEX.as_str(), tags.len()).prop_map(|xs| {
+                                xs.into_iter()
+                                    .map(|s| s.chars().next().expect("at least one character"))
+                                    .collect()
+                            }),
+                        )
+                            .prop_map(move |(name, seps)| {
+                                TaggedFile::from(RawTaggedFile {
+                                    name,
+                                    tags: tags.clone(),
+                                    seps,
+                                })
+                            })
+                    }),
+                0..=max_files,
+            )
+            .prop_filter("duplicate files", |files| {
+                files.iter().map(TagSetTaggedFile::new).all_unique()
+            })
+        })
+        .boxed()
 }
 
 pub fn make_file_and_parent<P>(fs: &FakeFileSystem, path: P)
