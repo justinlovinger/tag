@@ -166,6 +166,14 @@ impl TaggedFile {
             .map(|x| TagRef::new(self.slice(x)))
     }
 
+    pub fn tags_len(&self) -> usize {
+        self.tags.len()
+    }
+
+    pub fn tags_is_empty(&self) -> bool {
+        self.tags.is_empty()
+    }
+
     pub fn tags_str(&self) -> &str {
         match (self.tags.first(), self.tags.last()) {
             // This is safe

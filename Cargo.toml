@@ -11,6 +11,7 @@ by_address = "1.1.0"
 clap = { version = "4.1.4", features = ["derive"] }
 derive_more = "0.99.17"
 filesystem = "0.4.4"
+internment = "0.7.1"
 itertools = "0.11.0"
 ref-cast = "1.0.14"
 smallvec = "1.11.1"
