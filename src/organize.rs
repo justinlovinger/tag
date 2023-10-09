@@ -155,10 +155,7 @@ mod files {
                     (
                         file,
                         FileTags {
-                            unused_tags: file
-                                .tags()
-                                .map(|tag| Intern::new(tag.to_owned()))
-                                .collect(),
+                            unused_tags: file.tags().map(Intern::from_ref).collect(),
                             inline_tags: Default::default(),
                         },
                     )

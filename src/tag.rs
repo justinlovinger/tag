@@ -97,6 +97,12 @@ impl Borrow<TagRef> for Tag {
     }
 }
 
+impl<'a> From<&'a TagRef> for Tag {
+    fn from(value: &'a TagRef) -> Self {
+        value.to_owned()
+    }
+}
+
 impl ToOwned for TagRef {
     type Owned = Tag;
 
