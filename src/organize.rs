@@ -68,10 +68,9 @@ fn to_move_ops(files: Files, prefix: Prefix) -> Vec<MoveOp> {
                 Ok(())
             }),
     );
-    let (untagged_files, inline_tags) = files.finalize();
-    untagged_files
-        .map(|file| (format!("{}{TAG_END}{}", &prefix, file.name()).into(), file))
-        .chain(inline_tags.map(|(file, mut tags)| {
+    files
+        .finalize()
+        .map(|(file, mut tags)| {
             tags.sort_unstable_by(|tag, other| {
                 tag.len()
                     .cmp(&other.len())
@@ -92,7 +91,7 @@ fn to_move_ops(files: Files, prefix: Prefix) -> Vec<MoveOp> {
                 .into(),
                 file,
             )
-        }))
+        })
         .filter(|(to, file)| file.as_path() != to)
         .map(|(to, file)| MoveOp {
             to,
@@ -131,14 +130,7 @@ mod files {
         inline_tags: SmallVec<[Intern<Tag>; 1]>,
     }
 
-    #[derive(Debug, Default)]
-    struct DoneFiles<'a> {
-        untagged: DoneUntagged<'a>,
-        with_inline: DoneWithInline<'a>,
-    }
-
-    type DoneUntagged<'a> = Vec<&'a TaggedFile>;
-    type DoneWithInline<'a> = Vec<(&'a TaggedFile, SmallVec<[Intern<Tag>; 1]>)>;
+    type DoneFiles<'a> = Vec<(&'a TaggedFile, SmallVec<[Intern<Tag>; 1]>)>;
 
     impl<'a> Files<'a> {
         pub fn new(files: &'a [TaggedFile]) -> Self {
@@ -187,14 +179,10 @@ mod files {
                 let mut done_files = DoneFiles::default();
                 for file in files {
                     let file_tags = self.files_tags.get_mut(&file).unwrap();
-                    debug_assert!(file_tags.unused_tags.contains(&tag));
                     if file_tags.unused_tags.len() == 1 {
-                        let file_tags = self.files_tags.remove(&file).unwrap();
-                        if file_tags.inline_tags.is_empty() {
-                            done_files.untagged.push(file.0);
-                        } else {
-                            done_files.with_inline.push((file.0, file_tags.inline_tags));
-                        }
+                        debug_assert!(file_tags.unused_tags.contains(&tag));
+                        done_files
+                            .push((file.0, self.files_tags.remove(&file).unwrap().inline_tags));
                     } else {
                         file_tags.unused_tags.remove(&tag);
                     }
@@ -209,7 +197,6 @@ mod files {
 
                 for file in files_without {
                     let file_tags = with_tag.files_tags.remove(&file).unwrap();
-                    debug_assert!(!file_tags.unused_tags.contains(&tag));
                     for tag in &file_tags.unused_tags {
                         if let Some(tag_files) = with_tag.tags_files.get_mut(tag) {
                             without_tag.tags_files.entry(*tag).or_default().insert(file);
@@ -234,16 +221,9 @@ mod files {
 
                 for file in files {
                     let mut file_tags = without_tag.files_tags.remove(&file).unwrap();
-                    debug_assert!(file_tags.unused_tags.contains(&tag));
                     if file_tags.unused_tags.len() == 1 {
-                        if file_tags.inline_tags.is_empty() {
-                            with_tag.done_files.untagged.push(file.0);
-                        } else {
-                            with_tag
-                                .done_files
-                                .with_inline
-                                .push((file.0, file_tags.inline_tags));
-                        }
+                        debug_assert!(file_tags.unused_tags.contains(&tag));
+                        with_tag.done_files.push((file.0, file_tags.inline_tags));
                     } else {
                         file_tags.unused_tags.remove(&tag);
                         for tag in &file_tags.unused_tags {
@@ -284,10 +264,9 @@ mod files {
                     let file_tags = self.files_tags.get_mut(file).unwrap();
                     file_tags.inline_tags.push(*tag);
                     if file_tags.unused_tags.len() == 1 {
-                        let file_tags = self.files_tags.remove(file).unwrap();
+                        debug_assert!(file_tags.unused_tags.contains(tag));
                         self.done_files
-                            .with_inline
-                            .push((file.0, file_tags.inline_tags));
+                            .push((file.0, self.files_tags.remove(file).unwrap().inline_tags));
                     } else {
                         file_tags.unused_tags.remove(tag);
                     }
@@ -304,14 +283,8 @@ mod files {
 
         pub fn finalize(
             self,
-        ) -> (
-            impl Iterator<Item = &'a TaggedFile>,
-            impl Iterator<Item = (&'a TaggedFile, SmallVec<[Intern<Tag>; 1]>)>,
-        ) {
-            (
-                self.done_files.untagged.into_iter(),
-                self.done_files.with_inline.into_iter(),
-            )
+        ) -> impl Iterator<Item = (&'a TaggedFile, SmallVec<[Intern<Tag>; 1]>)> {
+            self.done_files.into_iter()
         }
     }
 }
