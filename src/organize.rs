@@ -9,28 +9,27 @@ use self::files::{Files, TagsFiles};
 
 type Prefix = Vec<(Intern<Tag>, usize)>; // (tag, count)
 
-pub fn organize(files: &[TaggedFile]) -> impl Iterator<Item = MoveOp> + '_ {
+pub fn organize(files: &[TaggedFile]) -> Vec<MoveOp> {
     _organize(Files::new(files), Default::default())
 }
 
-fn _organize(mut files: Files, prefix: Prefix) -> impl Iterator<Item = MoveOp> + '_ {
-    let mut moves = Vec::new();
-    loop {
+fn _organize(files: Files, prefix: Prefix) -> Vec<MoveOp> {
+    stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
         if let Some((tag, count)) = tag_to_split(files.tags_files()) {
             debug_assert_ne!(count, 0);
-
             let (with_tag, without_tag) = files.partition(tag);
-            files = without_tag;
-
-            moves.extend(_organize(
-                with_tag,
-                prefix.iter().cloned().chain([(tag, count)]).collect(),
-            ));
+            let with_tag_prefix = prefix.iter().cloned().chain([(tag, count)]).collect();
+            let (mut xs, ys) = rayon::join(
+                || _organize(with_tag, with_tag_prefix),
+                || _organize(without_tag, prefix),
+            );
+            xs.extend(ys);
+            xs
         } else {
             debug_assert_eq!(files.tags_files().len(), 0);
-            return moves.into_iter().chain(to_move_ops(files, prefix));
+            to_move_ops(files, prefix).collect()
         }
-    }
+    })
 }
 
 fn tag_to_split(tags_files: &TagsFiles) -> Option<(Intern<Tag>, usize)> {
@@ -115,6 +114,7 @@ mod files {
     use by_address::ByThinAddress;
     use internment::Intern;
     use itertools::Itertools;
+    use rayon::prelude::*;
     use smallvec::SmallVec;
 
     use crate::{Tag, TaggedFile};
@@ -147,24 +147,23 @@ mod files {
     impl<'a> Files<'a> {
         pub fn new(files: &'a [TaggedFile]) -> Self {
             let mut tags_files: TagsFiles = HashMap::new();
-            let files_tags: FilesTags = HashMap::from_iter(
-                files
-                    .iter()
-                    .map(ByThinAddress)
-                    .filter(|file| !file.tags_is_empty()) // Files with no tags will never move.
-                    .map(|file| {
-                        (
-                            file,
-                            FileTags {
-                                unused_tags: file
-                                    .tags()
-                                    .map(|tag| Intern::new(tag.to_owned()))
-                                    .collect(),
-                                inline_tags: Default::default(),
-                            },
-                        )
-                    }),
-            );
+            let files_tags: FilesTags = files
+                .iter()
+                .map(ByThinAddress)
+                .filter(|file| !file.tags_is_empty()) // Files with no tags will never move.
+                .map(|file| {
+                    (
+                        file,
+                        FileTags {
+                            unused_tags: file
+                                .tags()
+                                .map(|tag| Intern::new(tag.to_owned()))
+                                .collect(),
+                            inline_tags: Default::default(),
+                        },
+                    )
+                })
+                .collect();
             for (file, tags) in &files_tags {
                 for tag in &tags.unused_tags {
                     tags_files.entry(*tag).or_default().insert(*file);
@@ -186,11 +185,11 @@ mod files {
             let (mut with_tag, mut without_tag) = if files.len() > self.files_tags.len() / 2 {
                 let files_without = self
                     .files_tags
-                    .iter()
+                    .par_iter()
                     .filter(|(_, file_tags)| !file_tags.unused_tags.contains(&tag))
                     .map(|(file, _)| file)
                     .copied()
-                    .collect_vec();
+                    .collect::<Vec<_>>();
 
                 let mut done_files = DoneFiles::default();
                 for file in files {
