@@ -3,15 +3,15 @@ use itertools::Itertools;
 
 use crate::{types::MoveOp, Tag, TaggedFile, DIR_SEPARATOR, INLINE_SEPARATOR, TAG_END};
 
-use self::files::{Files, TagsFiles};
+use self::partition::{Partition, TagsFiles};
 
 type Prefix = Vec<(Intern<Tag>, usize)>; // (tag, count)
 
 pub fn organize(files: &[TaggedFile]) -> Vec<MoveOp> {
-    _organize(Files::new(files), Default::default())
+    _organize(Partition::new(files), Default::default())
 }
 
-fn _organize(files: Files, prefix: Prefix) -> Vec<MoveOp> {
+fn _organize(files: Partition, prefix: Prefix) -> Vec<MoveOp> {
     stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
         if let Some((tag, count)) = tag_to_split(files.tags_files()) {
             debug_assert_ne!(count, 0);
@@ -43,7 +43,7 @@ fn tag_to_split(tags_files: &TagsFiles) -> Option<(Intern<Tag>, usize)> {
         .map(|(tag, count)| (*tag, count))
 }
 
-fn to_move_ops(files: Files, prefix: Prefix) -> Vec<MoveOp> {
+fn to_move_ops(files: Partition, prefix: Prefix) -> Vec<MoveOp> {
     let separators = prefix
         .iter()
         .map(|(_, count)| count)
@@ -100,7 +100,7 @@ fn to_move_ops(files: Files, prefix: Prefix) -> Vec<MoveOp> {
         .collect()
 }
 
-mod files {
+mod partition {
     use std::{
         collections::{HashMap, HashSet},
         mem::replace,
@@ -115,7 +115,7 @@ mod files {
     use crate::{Tag, TaggedFile};
 
     #[derive(Debug)]
-    pub struct Files<'a> {
+    pub struct Partition<'a> {
         tags_files: TagsFiles<'a>,
         files_tags: FilesTags<'a>,
         done_files: DoneFiles<'a>,
@@ -132,7 +132,7 @@ mod files {
 
     type DoneFiles<'a> = Vec<(&'a TaggedFile, SmallVec<[Intern<Tag>; 1]>)>;
 
-    impl<'a> Files<'a> {
+    impl<'a> Partition<'a> {
         pub fn new(files: &'a [TaggedFile]) -> Self {
             let mut tags_files: TagsFiles = HashMap::new();
             let files_tags: FilesTags = files
