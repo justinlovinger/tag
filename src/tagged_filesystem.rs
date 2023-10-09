@@ -725,6 +725,29 @@ mod tests {
         assert!(filesystem.organize().is_err());
     }
 
+    #[test]
+    fn organize_does_not_panic_on_many_non_unique_tags() {
+        // `organize` is prone to stack-overflow
+        // if recursion is not handled carefully.
+        // This tests we support at least `BREADTH * DEPTH` non-unique tags.
+        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
+        const BREADTH: usize = 200;
+        const DEPTH: usize = 50;
+        let files = (0..BREADTH)
+            .flat_map(|n| {
+                let x = n * DEPTH;
+                let prefix = PathBuf::from((x..x + DEPTH).map(|x| format!("{x:04}")).join("-"));
+                [prefix.join("_bar"), prefix.join("_foo")]
+            })
+            .collect_vec();
+        for path in &files {
+            make_file_and_parent(&filesystem.fs, path);
+        }
+
+        filesystem.organize().unwrap();
+        assert_eq!(list_files(&filesystem.fs), files)
+    }
+
     fn list_files(fs: &FakeFileSystem) -> Vec<PathBuf> {
         let mut queue = vec![PathBuf::from("")];
         let mut files = Vec::new();
