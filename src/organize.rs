@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use internment::Intern;
 use itertools::Itertools;
 
@@ -27,7 +25,7 @@ fn _organize(files: Files, prefix: Prefix) -> Vec<MoveOp> {
             xs
         } else {
             debug_assert_eq!(files.tags_files().len(), 0);
-            to_move_ops(files, prefix).collect()
+            to_move_ops(files, prefix)
         }
     })
 }
@@ -45,7 +43,7 @@ fn tag_to_split(tags_files: &TagsFiles) -> Option<(Intern<Tag>, usize)> {
         .map(|(tag, count)| (*tag, count))
 }
 
-fn to_move_ops(files: Files, prefix: Prefix) -> impl Iterator<Item = MoveOp> + '_ {
+fn to_move_ops(files: Files, prefix: Prefix) -> Vec<MoveOp> {
     let separators = prefix
         .iter()
         .map(|(_, count)| count)
@@ -58,7 +56,7 @@ fn to_move_ops(files: Files, prefix: Prefix) -> impl Iterator<Item = MoveOp> + '
             }
         })
         .chain([DIR_SEPARATOR]);
-    let prefix = Rc::new(format!(
+    let prefix = format!(
         "{}",
         prefix
             .iter()
@@ -69,14 +67,11 @@ fn to_move_ops(files: Files, prefix: Prefix) -> impl Iterator<Item = MoveOp> + '
                 f(&sep)?;
                 Ok(())
             }),
-    ));
+    );
     let (untagged_files, inline_tags) = files.finalize();
     untagged_files
-        .map({
-            let prefix = Rc::clone(&prefix);
-            move |file| (format!("{}{TAG_END}{}", &prefix, file.name()).into(), file)
-        })
-        .chain(inline_tags.map(move |(file, mut tags)| {
+        .map(|file| (format!("{}{TAG_END}{}", &prefix, file.name()).into(), file))
+        .chain(inline_tags.map(|(file, mut tags)| {
             tags.sort_unstable_by(|tag, other| {
                 tag.len()
                     .cmp(&other.len())
@@ -103,6 +98,7 @@ fn to_move_ops(files: Files, prefix: Prefix) -> impl Iterator<Item = MoveOp> + '
             to,
             from: file.as_path().into(),
         })
+        .collect()
 }
 
 mod files {
