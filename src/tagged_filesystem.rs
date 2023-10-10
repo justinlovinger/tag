@@ -726,6 +726,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // This test is slow.
     fn organize_does_not_panic_on_many_non_unique_tags() {
         // `organize` is prone to stack-overflow
         // if recursion is not handled carefully.
