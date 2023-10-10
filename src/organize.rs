@@ -101,15 +101,13 @@ fn to_move_ops(files: Partition, prefix: Prefix) -> Vec<MoveOp> {
 }
 
 mod partition {
-    use std::{
-        collections::{HashMap, HashSet},
-        mem::replace,
-    };
+    use std::mem::replace;
 
     use by_address::ByThinAddress;
     use internment::Intern;
     use itertools::Itertools;
     use rayon::prelude::*;
+    use rustc_hash::{FxHashMap, FxHashSet};
     use smallvec::SmallVec;
 
     use crate::{Tag, TaggedFile};
@@ -121,12 +119,12 @@ mod partition {
         done_files: DoneFiles<'a>,
     }
 
-    pub type TagsFiles<'a> = HashMap<Intern<Tag>, HashSet<ByThinAddress<&'a TaggedFile>>>;
-    type FilesTags<'a> = HashMap<ByThinAddress<&'a TaggedFile>, FileTags>;
+    pub type TagsFiles<'a> = FxHashMap<Intern<Tag>, FxHashSet<ByThinAddress<&'a TaggedFile>>>;
+    type FilesTags<'a> = FxHashMap<ByThinAddress<&'a TaggedFile>, FileTags>;
 
     #[derive(Debug, Default)]
     struct FileTags {
-        unused_tags: HashSet<Intern<Tag>>,
+        unused_tags: FxHashSet<Intern<Tag>>,
         inline_tags: SmallVec<[Intern<Tag>; 1]>,
     }
 
@@ -134,7 +132,7 @@ mod partition {
 
     impl<'a> Partition<'a> {
         pub fn new(files: &'a [TaggedFile]) -> Self {
-            let mut tags_files: TagsFiles = HashMap::new();
+            let mut tags_files: TagsFiles = Default::default();
             let files_tags: FilesTags = files
                 .iter()
                 .map(ByThinAddress)
@@ -189,8 +187,8 @@ mod partition {
                 }
 
                 let mut without_tag = Self {
-                    tags_files: HashMap::new(),
-                    files_tags: HashMap::new(),
+                    tags_files: Default::default(),
+                    files_tags: Default::default(),
                     done_files: replace(&mut self.done_files, done_files),
                 };
                 let mut with_tag = self;
@@ -213,8 +211,8 @@ mod partition {
                 (with_tag, without_tag)
             } else {
                 let mut with_tag = Self {
-                    tags_files: HashMap::new(),
-                    files_tags: HashMap::new(),
+                    tags_files: Default::default(),
+                    files_tags: Default::default(),
                     done_files: Default::default(),
                 };
                 let mut without_tag = self;
