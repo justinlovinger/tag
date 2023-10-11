@@ -684,33 +684,27 @@ mod tests {
         filesystem.organize().unwrap();
 
         for dir in list_dirs(&filesystem.fs) {
-            for (x, y) in filesystem
-                .fs
-                .read_dir(dir)
-                .unwrap()
-                .filter_map(|x| x.unwrap().path().file_name().map(|x| x.to_os_string()))
-                .map(|name| {
-                    // Tags within a dir will not be split by `/`.
-                    let name = name.into_string().unwrap();
-                    match TaggedFile::new(name) {
-                        Ok(file) => file.tags().map(|x| x.to_owned()).collect_vec(),
-                        Err(e) => e
-                            .into_string()
-                            .split('-')
-                            .map(|x| Tag::new(x.to_owned()).unwrap())
-                            .collect_vec(),
-                    }
-                })
-                .collect_vec()
-                .into_iter()
-                .tuple_combinations()
-            {
-                for tag in &x {
-                    for other in &y {
-                        prop_assert_ne!(tag, other);
-                    }
-                }
-            }
+            prop_assert_eq!(
+                filesystem
+                    .fs
+                    .read_dir(dir)
+                    .unwrap()
+                    .filter_map(|x| x.unwrap().path().file_name().map(|x| x.to_os_string()))
+                    .flat_map(|name| {
+                        // Tags within a dir will not be split by `/`.
+                        let name = name.into_string().unwrap();
+                        match TaggedFile::new(name) {
+                            Ok(file) => file.tags().map(|x| x.to_owned()).collect_vec(),
+                            Err(e) => e
+                                .into_string()
+                                .split('-')
+                                .map(|x| Tag::new(x.to_owned()).unwrap())
+                                .collect_vec(),
+                        }
+                    })
+                    .all_unique(),
+                true
+            )
         }
     }
 
