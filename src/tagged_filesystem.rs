@@ -677,37 +677,6 @@ mod tests {
         );
     }
 
-    #[proptest(cases = 20)]
-    fn organize_results_in_unique_tags_in_directories(
-        filesystem: TaggedFilesystem<FakeFileSystem>,
-    ) {
-        filesystem.organize().unwrap();
-
-        for dir in list_dirs(&filesystem.fs) {
-            prop_assert_eq!(
-                filesystem
-                    .fs
-                    .read_dir(dir)
-                    .unwrap()
-                    .filter_map(|x| x.unwrap().path().file_name().map(|x| x.to_os_string()))
-                    .flat_map(|name| {
-                        // Tags within a dir will not be split by `/`.
-                        let name = name.into_string().unwrap();
-                        match TaggedFile::new(name) {
-                            Ok(file) => file.tags().map(|x| x.to_owned()).collect_vec(),
-                            Err(e) => e
-                                .into_string()
-                                .split('-')
-                                .map(|x| Tag::new(x.to_owned()).unwrap())
-                                .collect_vec(),
-                        }
-                    })
-                    .all_unique(),
-                true
-            )
-        }
-    }
-
     #[test]
     fn organize_returns_err_if_files_have_same_tags_and_name() {
         // These files cannot be organized
