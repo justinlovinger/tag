@@ -13,10 +13,15 @@ pub fn organize(files: &[TaggedFile]) -> Vec<MoveOp> {
 
 fn _organize(files: Partition, prefix: Prefix) -> Vec<MoveOp> {
     stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
-        if let Some((tag, count)) = tag_to_split(files.tags_files()) {
-            debug_assert_ne!(count, 0);
+        if let Some(tag) = tag_to_split(files.tags_files()) {
             let (with_tag, without_tag) = files.partition(tag);
-            let with_tag_prefix = prefix.iter().cloned().chain([(tag, count)]).collect();
+            debug_assert_ne!(with_tag.len(), 0);
+
+            let with_tag_prefix = prefix
+                .iter()
+                .cloned()
+                .chain([(tag, with_tag.len())])
+                .collect();
             let (mut xs, ys) = rayon::join(
                 || _organize(with_tag, with_tag_prefix),
                 || _organize(without_tag, prefix),
@@ -30,7 +35,7 @@ fn _organize(files: Partition, prefix: Prefix) -> Vec<MoveOp> {
     })
 }
 
-fn tag_to_split(tags_files: &TagsFiles) -> Option<(Intern<Tag>, usize)> {
+fn tag_to_split(tags_files: &TagsFiles) -> Option<Intern<Tag>> {
     tags_files
         .iter()
         .map(|(tag, tag_files)| (tag, tag_files.len()))
@@ -40,7 +45,7 @@ fn tag_to_split(tags_files: &TagsFiles) -> Option<(Intern<Tag>, usize)> {
                 .then_with(|| tag.len().cmp(&other_tag.len()))
                 .then_with(|| tag.cmp(other_tag).reverse())
         })
-        .map(|(tag, count)| (*tag, count))
+        .map(|(tag, _)| *tag)
 }
 
 fn to_move_ops(files: Partition, prefix: Prefix) -> Vec<MoveOp> {
@@ -132,7 +137,6 @@ mod partition {
 
     impl<'a> Partition<'a> {
         pub fn new(files: &'a [TaggedFile]) -> Self {
-            let mut tags_files: TagsFiles = Default::default();
             let files_tags: FilesTags = files
                 .iter()
                 .map(ByThinAddress)
@@ -147,17 +151,23 @@ mod partition {
                     )
                 })
                 .collect();
+
+            let mut tags_files: TagsFiles = Default::default();
             for (file, tags) in &files_tags {
                 for tag in &tags.unused_tags {
                     tags_files.entry(*tag).or_default().insert(*file);
                 }
             }
+
             let mut this = Self {
                 tags_files,
                 files_tags,
                 done_files: Default::default(),
             };
             this.extract_inline_tags();
+
+            this.validate();
+
             this
         }
 
@@ -165,92 +175,101 @@ mod partition {
         pub fn partition(mut self, tag: Intern<Tag>) -> (Self, Self) {
             let files = self.tags_files.remove(&tag).unwrap();
 
-            let (mut with_tag, mut without_tag) = if files.len() > self.files_tags.len() / 2 {
-                let files_without = self
-                    .files_tags
-                    .par_iter()
-                    .filter(|(_, file_tags)| !file_tags.unused_tags.contains(&tag))
-                    .map(|(file, _)| file)
-                    .copied()
-                    .collect::<Vec<_>>();
-
-                let mut done_files = DoneFiles::default();
-                for file in files {
-                    let file_tags = self.files_tags.get_mut(&file).unwrap();
-                    if file_tags.unused_tags.len() == 1 {
-                        debug_assert!(file_tags.unused_tags.contains(&tag));
-                        done_files
-                            .push((file.0, self.files_tags.remove(&file).unwrap().inline_tags));
-                    } else {
-                        file_tags.unused_tags.remove(&tag);
-                    }
-                }
-
-                let mut without_tag = Self {
-                    tags_files: Default::default(),
-                    files_tags: Default::default(),
-                    done_files: replace(&mut self.done_files, done_files),
-                };
-                let mut with_tag = self;
-
-                for file in files_without {
-                    let file_tags = with_tag.files_tags.remove(&file).unwrap();
-                    for tag in &file_tags.unused_tags {
-                        if let Some(tag_files) = with_tag.tags_files.get_mut(tag) {
-                            without_tag.tags_files.entry(*tag).or_default().insert(file);
-                            if tag_files.len() == 1 {
-                                with_tag.tags_files.remove(tag);
-                            } else {
-                                tag_files.remove(&file);
-                            }
-                        }
-                    }
-                    without_tag.files_tags.insert(file, file_tags);
-                }
-
-                (with_tag, without_tag)
+            let (mut with_tag, mut without_tag) = if files.len() > self.unused_len() / 2 {
+                self._partition_reverse(tag, files)
             } else {
-                let mut with_tag = Self {
-                    tags_files: Default::default(),
-                    files_tags: Default::default(),
-                    done_files: Default::default(),
-                };
-                let mut without_tag = self;
-
-                for file in files {
-                    let mut file_tags = without_tag.files_tags.remove(&file).unwrap();
-                    if file_tags.unused_tags.len() == 1 {
-                        debug_assert!(file_tags.unused_tags.contains(&tag));
-                        with_tag.done_files.push((file.0, file_tags.inline_tags));
-                    } else {
-                        file_tags.unused_tags.remove(&tag);
-                        for tag in &file_tags.unused_tags {
-                            with_tag.tags_files.entry(*tag).or_default().insert(file);
-                            let tag_files = without_tag.tags_files.get_mut(tag).unwrap();
-                            if tag_files.len() == 1 {
-                                without_tag.tags_files.remove(tag);
-                            } else {
-                                tag_files.remove(&file);
-                            }
-                        }
-                        with_tag.files_tags.insert(file, file_tags);
-                    }
-                }
-
-                (with_tag, without_tag)
+                self._partition(tag, files)
             };
 
             with_tag.extract_inline_tags();
             without_tag.extract_inline_tags();
 
-            debug_assert_eq!(
-                with_tag.files_tags.len(),
-                with_tag.tags_files.values().flatten().unique().count()
-            );
-            debug_assert_eq!(
-                without_tag.files_tags.len(),
-                without_tag.tags_files.values().flatten().unique().count()
-            );
+            with_tag.validate();
+            without_tag.validate();
+
+            (with_tag, without_tag)
+        }
+
+        fn _partition(
+            self,
+            tag: Intern<Tag>,
+            files: FxHashSet<ByThinAddress<&'a TaggedFile>>,
+        ) -> (Self, Self) {
+            let mut with_tag = Self {
+                tags_files: Default::default(),
+                files_tags: Default::default(),
+                done_files: Default::default(),
+            };
+            let mut without_tag = self;
+
+            for file in files {
+                let mut file_tags = without_tag.files_tags.remove(&file).unwrap();
+                if file_tags.unused_tags.len() == 1 {
+                    debug_assert!(file_tags.unused_tags.contains(&tag));
+                    with_tag.done_files.push((file.0, file_tags.inline_tags));
+                } else {
+                    file_tags.unused_tags.remove(&tag);
+                    for tag in &file_tags.unused_tags {
+                        with_tag.tags_files.entry(*tag).or_default().insert(file);
+                        let tag_files = without_tag.tags_files.get_mut(tag).unwrap();
+                        if tag_files.len() == 1 {
+                            without_tag.tags_files.remove(tag);
+                        } else {
+                            tag_files.remove(&file);
+                        }
+                    }
+                    with_tag.files_tags.insert(file, file_tags);
+                }
+            }
+
+            (with_tag, without_tag)
+        }
+
+        fn _partition_reverse(
+            mut self,
+            tag: Intern<Tag>,
+            files: FxHashSet<ByThinAddress<&'a TaggedFile>>,
+        ) -> (Self, Self) {
+            let files_without = self
+                .files_tags
+                .par_iter()
+                .filter(|(_, file_tags)| !file_tags.unused_tags.contains(&tag))
+                .map(|(file, _)| file)
+                .copied()
+                .collect::<Vec<_>>();
+
+            let mut done_files = DoneFiles::default();
+            for file in files {
+                let file_tags = self.files_tags.get_mut(&file).unwrap();
+                if file_tags.unused_tags.len() == 1 {
+                    debug_assert!(file_tags.unused_tags.contains(&tag));
+                    done_files.push((file.0, self.files_tags.remove(&file).unwrap().inline_tags));
+                } else {
+                    file_tags.unused_tags.remove(&tag);
+                }
+            }
+
+            let mut without_tag = Self {
+                tags_files: Default::default(),
+                files_tags: Default::default(),
+                done_files: replace(&mut self.done_files, done_files),
+            };
+            let mut with_tag = self;
+
+            for file in files_without {
+                let file_tags = with_tag.files_tags.remove(&file).unwrap();
+                for tag in &file_tags.unused_tags {
+                    if let Some(tag_files) = with_tag.tags_files.get_mut(tag) {
+                        without_tag.tags_files.entry(*tag).or_default().insert(file);
+                        if tag_files.len() == 1 {
+                            with_tag.tags_files.remove(tag);
+                        } else {
+                            tag_files.remove(&file);
+                        }
+                    }
+                }
+                without_tag.files_tags.insert(file, file_tags);
+            }
 
             (with_tag, without_tag)
         }
@@ -273,6 +292,25 @@ mod partition {
                     true
                 }
             });
+        }
+
+        fn validate(&self) {
+            debug_assert_eq!(
+                self.files_tags.len(),
+                self.tags_files.values().flatten().unique().count()
+            );
+            debug_assert!(!self
+                .done_files
+                .iter()
+                .any(|(file, _)| self.files_tags.contains_key(&ByThinAddress(*file))))
+        }
+
+        pub fn len(&self) -> usize {
+            self.files_tags.len() + self.done_files.len()
+        }
+
+        fn unused_len(&self) -> usize {
+            self.files_tags.len()
         }
 
         pub fn tags_files(&self) -> &TagsFiles {
