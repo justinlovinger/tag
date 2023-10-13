@@ -56,7 +56,7 @@ impl From<TagIndices> for SliceIndices {
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
-#[error("`{0}` is not a tagged file")]
+#[error("`{0}` is not a tagged file: tagged files must contain zero or more unique tags ended by `{INLINE_SEPARATOR}` or `{DIR_SEPARATOR}` with the tagging portion ended by `{TAG_END}`")]
 pub struct NewError(String);
 
 impl NewError {
@@ -70,32 +70,70 @@ impl NewError {
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
-pub enum InlineTagError<T> {
-    LacksTag(#[from] LacksTagError<T>),
-    AlreadyInline(#[from] AlreadyInlineError<T>),
+#[error("{0}")]
+pub enum InlineTagError {
+    LacksTag(#[from] LacksTagError),
+    AlreadyInline(#[from] AlreadyInlineError),
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
-pub enum UninlineTagError<T> {
-    LacksTag(#[from] LacksTagError<T>),
-    AlreadyUninline(#[from] AlreadyUninlineError<T>),
+#[error("{0}")]
+pub enum UninlineTagError {
+    LacksTag(#[from] LacksTagError),
+    AlreadyUninline(#[from] AlreadyUninlineError),
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
 #[error("`{0}` already has `{1}`")]
-pub struct HasTagError<T>(TaggedFile, T);
+pub struct HasTagError(TaggedFile, String);
+
+impl HasTagError {
+    fn new<T>(file: TaggedFile, tag: T) -> Self
+    where
+        T: AsRef<TagRef>,
+    {
+        Self(file, tag.as_ref().to_string())
+    }
+}
 
 #[derive(Debug, PartialEq, thiserror::Error)]
 #[error("`{0}` lacks `{1}`")]
-pub struct LacksTagError<T>(TaggedFile, T);
+pub struct LacksTagError(TaggedFile, String);
+
+impl LacksTagError {
+    fn new<T>(file: TaggedFile, tag: T) -> Self
+    where
+        T: AsRef<TagRef>,
+    {
+        Self(file, tag.as_ref().to_string())
+    }
+}
 
 #[derive(Debug, PartialEq, thiserror::Error)]
 #[error("`{0}` already has `{1}` inline")]
-pub struct AlreadyInlineError<T>(TaggedFile, T);
+pub struct AlreadyInlineError(TaggedFile, String);
+
+impl AlreadyInlineError {
+    fn new<T>(file: TaggedFile, tag: T) -> Self
+    where
+        T: AsRef<TagRef>,
+    {
+        Self(file, tag.as_ref().to_string())
+    }
+}
 
 #[derive(Debug, PartialEq, thiserror::Error)]
 #[error("`{0}` already has `{1}` as a directory-tag")]
-pub struct AlreadyUninlineError<T>(TaggedFile, T);
+pub struct AlreadyUninlineError(TaggedFile, String);
+
+impl AlreadyUninlineError {
+    fn new<T>(file: TaggedFile, tag: T) -> Self
+    where
+        T: AsRef<TagRef>,
+    {
+        Self(file, tag.as_ref().to_string())
+    }
+}
 
 impl TaggedFile {
     pub fn new(path: String) -> Result<TaggedFile, NewError> {
@@ -190,12 +228,12 @@ impl TaggedFile {
         self.path.as_ref()
     }
 
-    pub(crate) fn add_inline_tag<T>(self, tag: T) -> Result<MoveOp, HasTagError<T>>
+    pub(crate) fn add_inline_tag<T>(self, tag: T) -> Result<MoveOp, HasTagError>
     where
         T: AsRef<TagRef>,
     {
         if self.tags().any(|x| x == tag.as_ref()) {
-            Err(HasTagError(self, tag))
+            Err(HasTagError::new(self, tag))
         } else {
             Ok(MoveOp {
                 to: format!(
@@ -212,7 +250,7 @@ impl TaggedFile {
         }
     }
 
-    pub(crate) fn del_tag<T>(self, tag: T) -> Result<MoveOp, LacksTagError<T>>
+    pub(crate) fn del_tag<T>(self, tag: T) -> Result<MoveOp, LacksTagError>
     where
         T: AsRef<TagRef>,
     {
@@ -222,19 +260,19 @@ impl TaggedFile {
                 to: format!("{}{}", self.path_up_to(x), self.path_after(x)).into(),
                 from: self.into(),
             }),
-            None => Err(LacksTagError(self, tag)),
+            None => Err(LacksTagError::new(self, tag)),
         }
     }
 
     #[allow(dead_code)]
-    pub(crate) fn inline_tag<T>(self, tag: T) -> Result<MoveOp, InlineTagError<T>>
+    pub(crate) fn inline_tag<T>(self, tag: T) -> Result<MoveOp, InlineTagError>
     where
         T: AsRef<TagRef>,
     {
         match self.indices_of(&tag) {
             Some(tag_indices) => {
                 if self.separator_of(tag_indices) == INLINE_SEPARATOR {
-                    Err(AlreadyInlineError(self, tag).into())
+                    Err(AlreadyInlineError::new(self, tag).into())
                 } else {
                     Ok(MoveOp {
                         to: format!(
@@ -248,11 +286,11 @@ impl TaggedFile {
                     })
                 }
             }
-            None => Err(LacksTagError(self, tag).into()),
+            None => Err(LacksTagError::new(self, tag).into()),
         }
     }
 
-    pub(crate) fn uninline_tag<T>(self, tag: T) -> Result<MoveOp, UninlineTagError<T>>
+    pub(crate) fn uninline_tag<T>(self, tag: T) -> Result<MoveOp, UninlineTagError>
     where
         T: AsRef<TagRef>,
     {
@@ -260,7 +298,7 @@ impl TaggedFile {
         match tag_indices {
             Some(tag_indices) => {
                 if self.separator_of(tag_indices) == DIR_SEPARATOR {
-                    Err(AlreadyUninlineError(self, tag).into())
+                    Err(AlreadyUninlineError::new(self, tag).into())
                 } else {
                     Ok(MoveOp {
                         to: format!(
@@ -274,7 +312,7 @@ impl TaggedFile {
                     })
                 }
             }
-            None => Err(LacksTagError(self, tag).into()),
+            None => Err(LacksTagError::new(self, tag).into()),
         }
     }
 

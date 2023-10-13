@@ -43,14 +43,16 @@ impl From<MoveOp> for Op {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum AddError<T> {
-    HasTagError(#[from] HasTagError<T>),
+#[error("{0}")]
+pub enum AddError {
+    HasTagError(#[from] HasTagError),
     FilesystemError(#[from] std::io::Error),
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum DelError<T> {
-    LacksTagError(#[from] LacksTagError<T>),
+#[error("{0}")]
+pub enum DelError {
+    LacksTagError(#[from] LacksTagError),
     FilesystemError(#[from] std::io::Error),
 }
 
@@ -94,7 +96,7 @@ where
         }
     }
 
-    pub fn add<T>(&self, tag: T, file: TaggedFile) -> Result<(), AddError<T>>
+    pub fn add<T>(&self, tag: T, file: TaggedFile) -> Result<(), AddError>
     where
         T: fmt::Debug + AsRef<TagRef>,
     {
@@ -141,7 +143,7 @@ where
         Ok(())
     }
 
-    pub fn del<T>(&self, tag: T, file: TaggedFile) -> Result<(), DelError<T>>
+    pub fn del<T>(&self, tag: T, file: TaggedFile) -> Result<(), DelError>
     where
         T: AsRef<TagRef>,
     {
@@ -524,7 +526,7 @@ mod tests {
 
         make_file_and_parent(&filesystem.fs, &file);
 
-        assert!(filesystem.add(&tag, file.clone()).is_ok());
+        assert!(filesystem.add(tag, file.clone()).is_ok());
 
         assert!(filesystem.fs.is_file(expected));
         assert!(!filesystem.fs.is_file(file));
@@ -541,7 +543,7 @@ mod tests {
 
         filesystem.fs.create_file(&file, "").unwrap();
 
-        assert!(filesystem.add(&tag, file).is_err());
+        assert!(filesystem.add(tag, file).is_err());
     }
 
     #[test]
@@ -558,7 +560,7 @@ mod tests {
 
         make_file_and_parent(&filesystem.fs, &file);
 
-        assert!(filesystem.del(&tag, file.clone()).is_ok());
+        assert!(filesystem.del(tag, file.clone()).is_ok());
 
         assert!(filesystem.fs.is_file(expected));
         assert!(!filesystem.fs.is_file(file));
@@ -573,7 +575,7 @@ mod tests {
 
         filesystem.fs.create_file(&file, "").unwrap();
 
-        assert!(filesystem.del(&tag, file).is_err());
+        assert!(filesystem.del(tag, file).is_err());
     }
 
     #[test]

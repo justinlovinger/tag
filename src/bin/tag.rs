@@ -2,10 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use filesystem::OsFileSystem;
-use tag::{
-    AddError, DelError, Tag, TaggedFile, TaggedFilesystemBuilder, DIR_SEPARATOR, INLINE_SEPARATOR,
-    TAG_END,
-};
+use tag::{Tag, TaggedFile, TaggedFilesystemBuilder, DIR_SEPARATOR, INLINE_SEPARATOR, TAG_END};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -76,12 +73,10 @@ fn tag_parser(s: &str) -> Result<Tag, String> {
 }
 
 fn tagged_file_parser(s: &str) -> Result<TaggedFile, String> {
-    TaggedFile::new(s.to_owned()).map_err(|e| format!(
-        "{e}: tagged files must contain zero or more unique tags ended by `{INLINE_SEPARATOR}` or `{DIR_SEPARATOR}` with the tagging portion ended by `{TAG_END}`"
-    ))
+    TaggedFile::new(s.to_owned()).map_err(|e| e.to_string())
 }
 
-fn main() -> std::io::Result<()> {
+fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     let filesystem = TaggedFilesystemBuilder::new(OsFileSystem::new())
@@ -91,26 +86,17 @@ fn main() -> std::io::Result<()> {
     match args.command {
         Some(Commands::Add { tag, files }) => {
             for file in files {
-                match filesystem.add(&tag, file) {
-                    Ok(_) => {}
-                    Err(AddError::FilesystemError(e)) => return Err(e),
-                    Err(AddError::HasTagError(e)) => eprintln!("{e}"),
-                }
+                #[allow(clippy::needless_borrow)] // False positive
+                filesystem.add(&tag, file)?;
             }
         }
         Some(Commands::Del { tag, files }) => {
             for file in files {
-                match filesystem.del(&tag, file) {
-                    Ok(_) => {}
-                    Err(DelError::FilesystemError(e)) => return Err(e),
-                    Err(DelError::LacksTagError(e)) => eprintln!("{e}"),
-                }
+                #[allow(clippy::needless_borrow)] // False positive
+                filesystem.del(&tag, file)?;
             }
         }
-        Some(Commands::Path { tags, name }) => match filesystem.path(tags, name) {
-            Ok(file) => println!("{file}"),
-            Err(e) => eprintln!("{e}"),
-        },
+        Some(Commands::Path { tags, name }) => println!("{}", filesystem.path(tags, name)?),
         Some(Commands::Organize { path }) => {
             std::env::set_current_dir(path)?;
             filesystem.organize()?
