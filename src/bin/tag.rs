@@ -85,7 +85,7 @@ fn main() -> std::io::Result<()> {
                 match filesystem.add(&tag, file) {
                     Ok(_) => {}
                     Err(AddError::FilesystemError(e)) => return Err(e),
-                    Err(AddError::HasTagError(e)) => println!("{e}"),
+                    Err(AddError::HasTagError(e)) => eprintln!("{e}"),
                 }
             }
         }
@@ -94,7 +94,7 @@ fn main() -> std::io::Result<()> {
                 match filesystem.del(&tag, file) {
                     Ok(_) => {}
                     Err(DelError::FilesystemError(e)) => return Err(e),
-                    Err(DelError::LacksTagError(e)) => println!("{e}"),
+                    Err(DelError::LacksTagError(e)) => eprintln!("{e}"),
                 }
             }
         }
