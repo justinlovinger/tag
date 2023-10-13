@@ -94,7 +94,7 @@ where
         }
     }
 
-    pub fn add_tag<T>(&self, tag: T, file: TaggedFile) -> Result<(), AddError<T>>
+    pub fn add<T>(&self, tag: T, file: TaggedFile) -> Result<(), AddError<T>>
     where
         T: fmt::Debug + AsRef<TagRef>,
     {
@@ -141,7 +141,7 @@ where
         Ok(())
     }
 
-    pub fn del_tag<T>(&self, tag: T, file: TaggedFile) -> Result<(), DelError<T>>
+    pub fn del<T>(&self, tag: T, file: TaggedFile) -> Result<(), DelError<T>>
     where
         T: AsRef<TagRef>,
     {
@@ -341,36 +341,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn add_tag_renames_file_if_file_does_not_have_tag() {
-        test_add_tag(|_| {}, "foo-_bar", "baz", "foo-baz-_bar", |_| {});
-        test_add_tag(|_| {}, "foo/_bar", "baz", "foo/baz-_bar", |_| {});
-        test_add_tag(|_| {}, "🙂/_bar", "🙁", "🙂/🙁-_bar", |_| {});
+    fn add_renames_file_if_file_does_not_have_tag() {
+        test_add(|_| {}, "foo-_bar", "baz", "foo-baz-_bar", |_| {});
+        test_add(|_| {}, "foo/_bar", "baz", "foo/baz-_bar", |_| {});
+        test_add(|_| {}, "🙂/_bar", "🙁", "🙂/🙁-_bar", |_| {});
     }
 
     #[test]
-    fn add_tag_uses_directory_if_it_exists() {
-        test_add_tag(
+    fn add_uses_directory_if_it_exists() {
+        test_add(
             |fs| fs.create_dir("foo").unwrap(),
             "_bar",
             "foo",
             "foo/_bar",
             |_| {},
         );
-        test_add_tag(
+        test_add(
             |fs| fs.create_dir("baz").unwrap(),
             "foo-_bar",
             "baz",
             "baz/foo-_bar",
             |_| {},
         );
-        test_add_tag(
+        test_add(
             |fs| fs.create_dir_all("a/foo").unwrap(),
             "a/_bar",
             "foo",
             "a/foo/_bar",
             |_| {},
         );
-        test_add_tag(
+        test_add(
             |fs| fs.create_dir_all("a/🙂").unwrap(),
             "a/_bar",
             "🙂",
@@ -380,9 +380,9 @@ mod tests {
     }
 
     #[test]
-    fn add_tag_does_not_use_directory_if_not_parent_and_file_has_other_tags() {
+    fn add_does_not_use_directory_if_not_parent_and_file_has_other_tags() {
         let dir = "a/foo";
-        test_add_tag(
+        test_add(
             |fs| fs.create_dir_all(dir).unwrap(),
             "a/b/_bar",
             "foo",
@@ -392,9 +392,9 @@ mod tests {
     }
 
     #[test]
-    fn add_tag_uninlines_existing_file_with_tag() {
+    fn add_uninlines_existing_file_with_tag() {
         let existing_file = "foo-_bar";
-        test_add_tag(
+        test_add(
             |fs| fs.create_file(existing_file, "").unwrap(),
             "_baz",
             "foo",
@@ -406,14 +406,14 @@ mod tests {
         );
     }
 
-    // `add_tag` has several more conditions
+    // `add` has several more conditions
     // we could check for
     // and implement:
     //
     // ```
     // #[test]
-    // fn add_tag_uses_non_parent_directory_if_it_exists_and_uninline_tag_matches() {
-    //     test_add_tag(
+    // fn add_uses_non_parent_directory_if_it_exists_and_uninline_tag_matches() {
+    //     test_add(
     //         |fs| {
     //             fs.create_dir_all("foo/a").unwrap();
     //             fs.create_file("a/_baz", "").unwrap();
@@ -426,7 +426,7 @@ mod tests {
     //             assert!(fs.is_file("a/_baz"));
     //         },
     //     );
-    //     test_add_tag(
+    //     test_add(
     //         |fs| {
     //             fs.create_dir_all("a/foo/b").unwrap();
     //             fs.create_file("a/b/_baz", "").unwrap();
@@ -442,16 +442,16 @@ mod tests {
     // }
     //
     // #[test]
-    // fn add_tag_uses_non_parent_directory_if_it_exists_and_uninline_tag_matches_and_deletes_empty_dir(
+    // fn add_uses_non_parent_directory_if_it_exists_and_uninline_tag_matches_and_deletes_empty_dir(
     // ) {
-    //     test_add_tag(
+    //     test_add(
     //         |fs| fs.create_dir_all("foo/a").unwrap(),
     //         "a/_bar",
     //         "foo",
     //         "foo/a/_bar",
     //         |fs| assert!(!fs.is_dir("a")),
     //     );
-    //     test_add_tag(
+    //     test_add(
     //         |fs| fs.create_dir_all("a/foo/b").unwrap(),
     //         "a/b/_bar",
     //         "foo",
@@ -461,8 +461,8 @@ mod tests {
     // }
     //
     // #[test]
-    // fn add_tag_uses_non_parent_directory_if_it_exists_and_uninlines_tag() {
-    //     test_add_tag(
+    // fn add_uses_non_parent_directory_if_it_exists_and_uninlines_tag() {
+    //     test_add(
     //         |fs| fs.create_dir_all("foo/a").unwrap(),
     //         "a-_bar",
     //         "foo",
@@ -472,10 +472,10 @@ mod tests {
     // }
     //
     // #[test]
-    // fn add_tag_uninlines_existing_parent_dir_with_tag() {
+    // fn add_uninlines_existing_parent_dir_with_tag() {
     //     let existing_dir = "foo-bar";
     //     let existing_file = "foo-bar/_baz";
-    //     test_add_tag(
+    //     test_add(
     //         |fs| {
     //             fs.create_dir(existing_dir).unwrap();
     //             fs.create_file(existing_file, "").unwrap();
@@ -493,7 +493,7 @@ mod tests {
     // }
     // ```
 
-    fn test_add_tag<F, FP>(pre: F, file: &str, tag: &str, expected: &str, post: FP)
+    fn test_add<F, FP>(pre: F, file: &str, tag: &str, expected: &str, post: FP)
     where
         F: FnOnce(&FakeFileSystem),
         FP: FnOnce(&FakeFileSystem),
@@ -506,7 +506,7 @@ mod tests {
 
         make_file_and_parent(&filesystem.fs, &file);
 
-        assert!(filesystem.add_tag(&tag, file.clone()).is_ok());
+        assert!(filesystem.add(&tag, file.clone()).is_ok());
 
         assert!(filesystem.fs.is_file(expected));
         assert!(!filesystem.fs.is_file(file));
@@ -515,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn add_tag_returns_error_if_file_already_has_tag() {
+    fn add_returns_error_if_file_already_has_tag() {
         let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
 
         let tag = Tag::new("foo".to_owned()).unwrap();
@@ -523,31 +523,31 @@ mod tests {
 
         filesystem.fs.create_file(&file, "").unwrap();
 
-        assert!(filesystem.add_tag(&tag, file).is_err());
+        assert!(filesystem.add(&tag, file).is_err());
     }
 
     #[test]
-    fn del_tag_moves_file_if_file_has_tag() {
-        test_del_tag("foo-_bar", "foo", "_bar");
-        test_del_tag("foo/_bar", "foo", "_bar");
-        test_del_tag("🙂/foo-_bar", "foo", "🙂/_bar");
+    fn del_moves_file_if_file_has_tag() {
+        test_del("foo-_bar", "foo", "_bar");
+        test_del("foo/_bar", "foo", "_bar");
+        test_del("🙂/foo-_bar", "foo", "🙂/_bar");
     }
 
-    fn test_del_tag(file: &str, tag: &str, expected: &str) {
+    fn test_del(file: &str, tag: &str, expected: &str) {
         let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
         let file = TaggedFile::new(file.to_owned()).unwrap();
         let tag = Tag::new(tag.to_owned()).unwrap();
 
         make_file_and_parent(&filesystem.fs, &file);
 
-        assert!(filesystem.del_tag(&tag, file.clone()).is_ok());
+        assert!(filesystem.del(&tag, file.clone()).is_ok());
 
         assert!(filesystem.fs.is_file(expected));
         assert!(!filesystem.fs.is_file(file));
     }
 
     #[test]
-    fn del_tag_returns_error_if_file_lacks_tag() {
+    fn del_returns_error_if_file_lacks_tag() {
         let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
 
         let tag = Tag::new("foo".to_owned()).unwrap();
@@ -555,7 +555,7 @@ mod tests {
 
         filesystem.fs.create_file(&file, "").unwrap();
 
-        assert!(filesystem.del_tag(&tag, file).is_err());
+        assert!(filesystem.del(&tag, file).is_err());
     }
 
     #[test]

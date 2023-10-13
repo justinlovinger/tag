@@ -82,7 +82,7 @@ fn main() -> std::io::Result<()> {
     match args.command {
         Some(Commands::Add { tag, files }) => {
             for file in files {
-                match filesystem.add_tag(&tag, file) {
+                match filesystem.add(&tag, file) {
                     Ok(_) => {}
                     Err(AddError::FilesystemError(e)) => return Err(e),
                     Err(AddError::HasTagError(e)) => println!("{e}"),
@@ -91,7 +91,7 @@ fn main() -> std::io::Result<()> {
         }
         Some(Commands::Del { tag, files }) => {
             for file in files {
-                match filesystem.del_tag(&tag, file) {
+                match filesystem.del(&tag, file) {
                     Ok(_) => {}
                     Err(DelError::FilesystemError(e)) => return Err(e),
                     Err(DelError::LacksTagError(e)) => println!("{e}"),
