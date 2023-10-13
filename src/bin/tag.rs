@@ -84,18 +84,8 @@ fn main() -> anyhow::Result<()> {
         .verbose(args.verbose)
         .build();
     match args.command {
-        Some(Commands::Add { tag, files }) => {
-            for file in files {
-                #[allow(clippy::needless_borrow)] // False positive
-                filesystem.add(&tag, file)?;
-            }
-        }
-        Some(Commands::Del { tag, files }) => {
-            for file in files {
-                #[allow(clippy::needless_borrow)] // False positive
-                filesystem.del(&tag, file)?;
-            }
-        }
+        Some(Commands::Add { tag, files }) => filesystem.add(tag, files)?,
+        Some(Commands::Del { tag, files }) => filesystem.del(tag, files)?,
         Some(Commands::Path { tags, name }) => println!("{}", filesystem.path(tags, name)?),
         Some(Commands::Organize { path }) => {
             std::env::set_current_dir(path)?;

@@ -12,7 +12,7 @@ use crate::{
     organize::organize,
     tagged_file::{HasTagError, LacksTagError, NewError},
     types::MoveOp,
-    TagRef, TaggedFile, INLINE_SEPARATOR,
+    Tag, TaggedFile, INLINE_SEPARATOR,
 };
 
 #[derive(Debug)]
@@ -96,69 +96,72 @@ where
         }
     }
 
-    pub fn add<T>(&self, tag: T, file: TaggedFile) -> Result<(), AddError>
-    where
-        T: fmt::Debug + AsRef<TagRef>,
-    {
-        if let Some(parent) = file.as_path().parent() {
-            let dir_tag = parent.join(tag.as_ref().as_path());
-            let to_path = dir_tag.join(
-                file.as_path()
-                    .file_name()
-                    .expect("file with parent should have file name"),
-            );
+    pub fn add(
+        &self,
+        tag: Tag,
+        files: impl IntoIterator<Item = TaggedFile>,
+    ) -> Result<(), AddError> {
+        for file in files.into_iter() {
+            if let Some(parent) = file.as_path().parent() {
+                let dir_tag = parent.join(tag.as_path());
+                let to_path = dir_tag.join(
+                    file.as_path()
+                        .file_name()
+                        .expect("file with parent should have file name"),
+                );
 
-            if self.fs.is_dir(&dir_tag) {
-                self.apply(MoveOp {
-                    to: to_path,
-                    from: file.into(),
-                })?;
-                return Ok(());
-            }
-
-            if let Some(other_file) = (|| -> std::io::Result<_> {
-                for other_file in self.sane_read_dir(parent)? {
-                    if let Ok(other_file) = TaggedFile::from_path(other_file?) {
-                        if other_file.tags().any(|x| x == tag.as_ref()) {
-                            return Ok(Some(other_file));
-                        }
-                    }
-                }
-                Ok(None)
-            })()? {
-                self.apply_all(from_move_ops(vec![
-                    other_file
-                        .uninline_tag(tag)
-                        .expect("other file should have tag inline"),
-                    MoveOp {
+                if self.fs.is_dir(&dir_tag) {
+                    self.apply(MoveOp {
                         to: to_path,
                         from: file.into(),
-                    },
-                ]))?;
-                return Ok(());
+                    })?;
+                    return Ok(());
+                }
+
+                if let Some(other_file) = (|| -> std::io::Result<_> {
+                    for other_file in self.sane_read_dir(parent)? {
+                        if let Ok(other_file) = TaggedFile::from_path(other_file?) {
+                            if other_file.tags().any(|x| x == tag.as_ref()) {
+                                return Ok(Some(other_file));
+                            }
+                        }
+                    }
+                    Ok(None)
+                })()? {
+                    self.apply_all(from_move_ops(vec![
+                        other_file
+                            .uninline_tag(tag)
+                            .expect("other file should have tag inline"),
+                        MoveOp {
+                            to: to_path,
+                            from: file.into(),
+                        },
+                    ]))?;
+                    return Ok(());
+                }
             }
+
+            self.apply(file.add_inline_tag(&tag)?)?;
         }
-
-        self.apply(file.add_inline_tag(tag)?)?;
         Ok(())
     }
 
-    pub fn del<T>(&self, tag: T, file: TaggedFile) -> Result<(), DelError>
-    where
-        T: AsRef<TagRef>,
-    {
-        self.apply_all(from_move_ops(vec![file.del_tag(tag)?]))?;
-        Ok(())
-    }
-
-    pub fn path<T>(
+    pub fn del(
         &self,
-        tags: impl IntoIterator<Item = T>,
+        tag: Tag,
+        files: impl IntoIterator<Item = TaggedFile>,
+    ) -> Result<(), DelError> {
+        for file in files.into_iter() {
+            self.apply_all(from_move_ops(vec![file.del_tag(&tag)?]))?;
+        }
+        Ok(())
+    }
+
+    pub fn path(
+        &self,
+        tags: impl IntoIterator<Item = Tag>,
         name: impl fmt::Display,
-    ) -> Result<TaggedFile, NewError>
-    where
-        T: AsRef<TagRef>,
-    {
+    ) -> Result<TaggedFile, NewError> {
         TaggedFile::new(format!(
             "{}_{name}",
             tags.into_iter().format_with("", |tag, f| {
@@ -526,7 +529,7 @@ mod tests {
 
         make_file_and_parent(&filesystem.fs, &file);
 
-        assert!(filesystem.add(tag, file.clone()).is_ok());
+        assert!(filesystem.add(tag, [file.clone()]).is_ok());
 
         assert!(filesystem.fs.is_file(expected));
         assert!(!filesystem.fs.is_file(file));
@@ -543,7 +546,7 @@ mod tests {
 
         filesystem.fs.create_file(&file, "").unwrap();
 
-        assert!(filesystem.add(tag, file).is_err());
+        assert!(filesystem.add(tag, [file]).is_err());
     }
 
     #[test]
@@ -560,7 +563,7 @@ mod tests {
 
         make_file_and_parent(&filesystem.fs, &file);
 
-        assert!(filesystem.del(tag, file.clone()).is_ok());
+        assert!(filesystem.del(tag, [file.clone()]).is_ok());
 
         assert!(filesystem.fs.is_file(expected));
         assert!(!filesystem.fs.is_file(file));
@@ -575,7 +578,7 @@ mod tests {
 
         filesystem.fs.create_file(&file, "").unwrap();
 
-        assert!(filesystem.del(tag, file).is_err());
+        assert!(filesystem.del(tag, [file]).is_err());
     }
 
     #[test]
