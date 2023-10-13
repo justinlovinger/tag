@@ -44,6 +44,15 @@ enum Commands {
         #[clap(required = true, value_name = "FILE", value_parser = tagged_file_parser)]
         files: Vec<TaggedFile>,
     },
+    /// Print path of file with given tags and name
+    #[command(allow_missing_positional = true)]
+    Path {
+        #[clap(value_name = "TAG", value_parser = tag_parser)]
+        tags: Vec<Tag>,
+
+        #[clap(required = true, value_name = "NAME")]
+        name: String,
+    },
     /// Organize all tagged files under the given directory
     ///
     /// Tags are split into directories,
@@ -98,6 +107,10 @@ fn main() -> std::io::Result<()> {
                 }
             }
         }
+        Some(Commands::Path { tags, name }) => match filesystem.path(tags, name) {
+            Ok(file) => println!("{file}"),
+            Err(e) => eprintln!("{e}"),
+        },
         Some(Commands::Organize { path }) => {
             std::env::set_current_dir(path)?;
             filesystem.organize()?

@@ -10,9 +10,9 @@ use itertools::Itertools;
 
 use crate::{
     organize::organize,
-    tagged_file::{HasTagError, LacksTagError},
+    tagged_file::{HasTagError, LacksTagError, NewError},
     types::MoveOp,
-    TagRef, TaggedFile,
+    TagRef, TaggedFile, INLINE_SEPARATOR,
 };
 
 #[derive(Debug)]
@@ -147,6 +147,24 @@ where
     {
         self.apply_all(from_move_ops(vec![file.del_tag(tag)?]))?;
         Ok(())
+    }
+
+    pub fn path<T>(
+        &self,
+        tags: impl IntoIterator<Item = T>,
+        name: impl fmt::Display,
+    ) -> Result<TaggedFile, NewError>
+    where
+        T: AsRef<TagRef>,
+    {
+        TaggedFile::new(format!(
+            "{}_{name}",
+            tags.into_iter().format_with("", |tag, f| {
+                f(&tag.as_ref())?;
+                f(&INLINE_SEPARATOR)?;
+                Ok(())
+            })
+        ))
     }
 
     pub fn organize(&self) -> std::io::Result<()> {
@@ -556,6 +574,35 @@ mod tests {
         filesystem.fs.create_file(&file, "").unwrap();
 
         assert!(filesystem.del(&tag, file).is_err());
+    }
+
+    #[test]
+    fn path_returns_file_if_valid() {
+        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
+        assert_eq!(
+            filesystem.path(
+                [
+                    Tag::new("foo".to_owned()).unwrap(),
+                    Tag::new("bar".to_owned()).unwrap()
+                ],
+                "baz"
+            ),
+            Ok(TaggedFile::new("foo-bar-_baz".to_owned()).unwrap())
+        );
+    }
+
+    #[test]
+    fn path_returns_err_if_tag_is_duplicate() {
+        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
+        assert!(filesystem
+            .path(
+                [
+                    Tag::new("foo".to_owned()).unwrap(),
+                    Tag::new("foo".to_owned()).unwrap()
+                ],
+                "baz"
+            )
+            .is_err());
     }
 
     #[test]
