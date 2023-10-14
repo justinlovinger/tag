@@ -814,6 +814,69 @@ mod tests {
         assert_eq!(list_files(&filesystem.fs), files)
     }
 
+    #[proptest(cases = 20)]
+    fn add_inverses_del(
+        #[strategy(TaggedFilesystem::<FakeFileSystem>::arbitrary_with(TaggedFilesParams {
+            min_tags: 1, min_files: 1, ..TaggedFilesParams::default()
+        }))]
+        filesystem: TaggedFilesystem<FakeFileSystem>,
+        file_index: usize,
+        tag_index: usize,
+    ) {
+        filesystem.organize().unwrap();
+
+        let files = list_files(&filesystem.fs);
+        let file = TaggedFile::from_path(files[file_index % files.len()].clone()).unwrap();
+        let tag = file
+            .tags()
+            .nth(tag_index % file.tags_len())
+            .unwrap()
+            .to_owned();
+
+        let new_file = filesystem
+            .del(tag.clone(), [file])
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        filesystem
+            .add(tag, [TaggedFile::from_path(new_file).unwrap()])
+            .unwrap();
+        prop_assert_eq!(list_files(&filesystem.fs), files)
+    }
+
+    #[proptest(cases = 20)]
+    fn del_inverses_add(
+        #[strategy(TaggedFileSystemWithMetadata::arbitrary_with(TaggedFilesParams {
+            min_files: 1, ..TaggedFilesParams::default()
+        }))]
+        args: TaggedFileSystemWithMetadata,
+        file_index: usize,
+        tag: Tag,
+    ) {
+        let filesystem = args.filesystem;
+        let tags = args.tags;
+        filesystem.organize().unwrap();
+
+        let files = list_files(&filesystem.fs);
+        let file = TaggedFile::from_path(files[file_index % files.len()].clone()).unwrap();
+        let tag = tags
+            .into_iter()
+            .find(|tag| !file.tags().contains(&tag.as_ref()))
+            .unwrap_or(tag);
+
+        let new_file = filesystem
+            .add(tag.clone(), [file])
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        filesystem
+            .del(tag, [TaggedFile::from_path(new_file).unwrap()])
+            .unwrap();
+        prop_assert_eq!(list_files(&filesystem.fs), files)
+    }
+
     fn clone_fake_fs(fs: &FakeFileSystem) -> FakeFileSystem {
         let new_fs = FakeFileSystem::new();
         for file in list_files(fs) {
