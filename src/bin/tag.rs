@@ -86,7 +86,11 @@ fn main() -> anyhow::Result<()> {
     match args.command {
         Some(Commands::Add { tag, files }) => filesystem.add(tag, files)?,
         Some(Commands::Del { tag, files }) => filesystem.del(tag, files)?,
-        Some(Commands::Path { tags, name }) => println!("{}", filesystem.path(tags, name)?),
+        Some(Commands::Path { tags, name }) => {
+            // `display()` should be fine
+            // because invalid unicode should crash before here.
+            println!("{}", filesystem.path(tags, name)?.display())
+        }
         Some(Commands::Organize { path }) => {
             std::env::set_current_dir(path)?;
             filesystem.organize()?

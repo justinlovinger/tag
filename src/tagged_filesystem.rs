@@ -1,6 +1,5 @@
 use std::{
-    collections::BTreeSet,
-    fmt,
+    collections::{BTreeSet, HashSet},
     path::{Path, PathBuf},
 };
 
@@ -10,7 +9,7 @@ use itertools::Itertools;
 
 use crate::{
     organize::organize,
-    tagged_file::{HasTagError, LacksTagError, NewError},
+    tagged_file::{HasTagError, LacksTagError},
     types::MoveOp,
     Tag, TaggedFile, INLINE_SEPARATOR,
 };
@@ -46,15 +45,37 @@ impl From<MoveOp> for Op {
 #[error("{0}")]
 pub enum AddError {
     HasTagError(#[from] HasTagError),
-    FilesystemError(#[from] std::io::Error),
+    MoveAndOrganizeError(#[from] MoveAndOrganizeError),
 }
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub enum DelError {
     LacksTagError(#[from] LacksTagError),
+    MoveAndOrganizeError(#[from] MoveAndOrganizeError),
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub enum MoveAndOrganizeError {
+    FileNotFoundError(#[from] FileNotFoundError),
     FilesystemError(#[from] std::io::Error),
 }
+
+#[derive(Debug, thiserror::Error)]
+#[error("File '{0}' not found")]
+pub struct FileNotFoundError(PathBuf);
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub enum PathError {
+    NonUniqueTagError(#[from] NonUniqueTagError),
+    FilesystemError(#[from] std::io::Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Tag is not unique")]
+pub struct NonUniqueTagError;
 
 impl<F> TaggedFilesystemBuilder<F> {
     pub fn new(fs: F) -> Self {
@@ -101,49 +122,12 @@ where
         tag: Tag,
         files: impl IntoIterator<Item = TaggedFile>,
     ) -> Result<(), AddError> {
-        for file in files.into_iter() {
-            if let Some(parent) = file.as_path().parent() {
-                let dir_tag = parent.join(tag.as_path());
-                let to_path = dir_tag.join(
-                    file.as_path()
-                        .file_name()
-                        .expect("file with parent should have file name"),
-                );
-
-                if self.fs.is_dir(&dir_tag) {
-                    self.apply(MoveOp {
-                        to: to_path,
-                        from: file.into(),
-                    })?;
-                    return Ok(());
-                }
-
-                if let Some(other_file) = (|| -> std::io::Result<_> {
-                    for other_file in self.sane_read_dir(parent)? {
-                        if let Ok(other_file) = TaggedFile::from_path(other_file?) {
-                            if other_file.tags().any(|x| x == tag.as_ref()) {
-                                return Ok(Some(other_file));
-                            }
-                        }
-                    }
-                    Ok(None)
-                })()? {
-                    self.apply_all(from_move_ops(vec![
-                        other_file
-                            .uninline_tag(tag)
-                            .expect("other file should have tag inline"),
-                        MoveOp {
-                            to: to_path,
-                            from: file.into(),
-                        },
-                    ]))?;
-                    return Ok(());
-                }
-            }
-
-            self.apply(file.add_inline_tag(&tag)?)?;
-        }
-        Ok(())
+        Ok(self.move_and_organize(
+            files
+                .into_iter()
+                .map(|file| file.add_inline_tag(&tag))
+                .collect::<Result<Vec<_>, _>>()?,
+        )?)
     }
 
     pub fn del(
@@ -151,30 +135,99 @@ where
         tag: Tag,
         files: impl IntoIterator<Item = TaggedFile>,
     ) -> Result<(), DelError> {
-        for file in files.into_iter() {
-            self.apply_all(from_move_ops(vec![file.del_tag(&tag)?]))?;
-        }
-        Ok(())
+        Ok(self.move_and_organize(
+            files
+                .into_iter()
+                .map(|file| file.del_tag(&tag))
+                .collect::<Result<Vec<_>, _>>()?,
+        )?)
     }
 
-    pub fn path(
+    pub fn path<S>(
         &self,
         tags: impl IntoIterator<Item = Tag>,
-        name: impl fmt::Display,
-    ) -> Result<TaggedFile, NewError> {
-        TaggedFile::new(format!(
-            "{}_{name}",
-            tags.into_iter().format_with("", |tag, f| {
-                f(&tag.as_ref())?;
-                f(&INLINE_SEPARATOR)?;
-                Ok(())
-            })
-        ))
+        name: S,
+    ) -> Result<PathBuf, PathError>
+    where
+        S: AsRef<str>,
+    {
+        let mut tag_set = HashSet::new();
+        for tag in tags.into_iter() {
+            if !tag_set.insert(tag) {
+                return Err(NonUniqueTagError.into());
+            }
+        }
+
+        let mut files = self.find_tagged_files("".into())?;
+        let (file_is_fake, from) = match files.iter().find(|other| {
+            other.tags_len() == tag_set.len()
+                && other.tags().all(|tag| tag_set.contains(tag))
+                && other.name() == name.as_ref()
+        }) {
+            Some(file) => (false, file.as_path().to_owned()),
+            None => {
+                let file = TaggedFile::new(format!(
+                    "{}_{}",
+                    tag_set.into_iter().format_with("", |tag, f| {
+                        f(&tag)?;
+                        f(&INLINE_SEPARATOR)?;
+                        Ok(())
+                    }),
+                    name.as_ref(),
+                ))
+                .expect("file should be valid");
+                let from = file.as_path().to_owned();
+                files.push(file);
+                (true, from)
+            }
+        };
+
+        let mut organized_move_ops = organize(&files);
+        let enumerated_to = organized_move_ops
+            .iter()
+            .enumerate()
+            .find(|(_, op)| op.from == from)
+            .map(|(i, op)| (i, op.to.clone()));
+        if file_is_fake {
+            if let Some((i, _)) = enumerated_to {
+                organized_move_ops.swap_remove(i);
+            }
+        }
+        self.apply_all(from_move_ops(organized_move_ops))?;
+
+        Ok(enumerated_to.map_or(from, |(_, to)| to))
     }
 
     pub fn organize(&self) -> std::io::Result<()> {
         let files = self.find_tagged_files("".into())?;
         self.apply_all(from_move_ops(organize(&files)))?;
+        Ok(())
+    }
+
+    fn move_and_organize(&self, move_ops: Vec<MoveOp>) -> Result<(), MoveAndOrganizeError> {
+        let mut files = self.find_tagged_files("".into())?;
+        for op in move_ops.iter() {
+            match files.iter_mut().find(|file| file.as_path() == op.from) {
+                Some(f) => {
+                    *f = TaggedFile::from_path(op.to.clone())
+                        .expect("file should be valid after adding tag");
+                }
+                None => return Err(FileNotFoundError(op.from.clone()).into()),
+            }
+        }
+
+        let mut organized_move_ops = organize(&files);
+        for op in move_ops {
+            match organized_move_ops
+                .iter_mut()
+                .find(|other| other.from == op.to)
+            {
+                Some(file) => file.from = op.from,
+                None => organized_move_ops.push(op),
+            }
+        }
+
+        self.apply_all(from_move_ops(organized_move_ops))?;
         Ok(())
     }
 
@@ -357,7 +410,10 @@ mod tests {
     use test_strategy::proptest;
 
     use crate::{
-        testing::{make_file_and_parent, tagged_files_strategy, TagSetTaggedFile},
+        testing::{
+            fake_filesystem_with, make_file_and_parent, tagged_files_strategy, TagSetTaggedFile,
+            TaggedFileSystemWithMetadata, TaggedFilesParams,
+        },
         Tag,
     };
 
@@ -365,235 +421,216 @@ mod tests {
 
     #[test]
     fn add_renames_file_if_file_does_not_have_tag() {
-        test_add(|_| {}, "foo-_bar", "baz", "foo-baz-_bar", |_| {});
-        test_add(|_| {}, "foo/_bar", "baz", "foo/baz-_bar", |_| {});
-        test_add(|_| {}, "🙂/_bar", "🙁", "🙂/🙁-_bar", |_| {});
-    }
-
-    #[test]
-    fn add_uses_directory_if_it_exists() {
-        test_add(
-            |fs| fs.create_dir("foo").unwrap(),
-            "_bar",
-            "foo",
-            "foo/_bar",
-            |_| {},
-        );
-        test_add(
-            |fs| fs.create_dir("baz").unwrap(),
-            "foo-_bar",
-            "baz",
-            "baz/foo-_bar",
-            |_| {},
-        );
-        test_add(
-            |fs| fs.create_dir_all("a/foo").unwrap(),
-            "a/_bar",
-            "foo",
-            "a/foo/_bar",
-            |_| {},
-        );
-        test_add(
-            |fs| fs.create_dir_all("a/🙂").unwrap(),
-            "a/_bar",
-            "🙂",
-            "a/🙂/_bar",
-            |_| {},
+        let file = TaggedFile::new("foo-_bar".to_owned()).unwrap();
+        let filesystem = fake_filesystem_with([&file]);
+        filesystem
+            .add(Tag::new("baz".to_owned()).unwrap(), [file])
+            .unwrap();
+        assert_eq!(
+            list_files(&filesystem.fs),
+            ["baz-foo-_bar"].map(PathBuf::from)
         );
     }
 
     #[test]
-    fn add_does_not_use_directory_if_not_parent_and_file_has_other_tags() {
-        let dir = "a/foo";
-        test_add(
-            |fs| fs.create_dir_all(dir).unwrap(),
-            "a/b/_bar",
-            "foo",
-            "a/b/foo-_bar",
-            |fs| assert!(fs.is_dir(dir)),
+    fn add_renames_all_files() {
+        let files = ["foo-_bar", "bar-_foo"];
+        let filesystem = fake_filesystem_with(files);
+        filesystem
+            .add(
+                Tag::new("baz".to_owned()).unwrap(),
+                files.map(|file| TaggedFile::new(file.to_owned()).unwrap()),
+            )
+            .unwrap();
+        assert_eq!(
+            list_files(&filesystem.fs),
+            ["baz/bar-_foo", "baz/foo-_bar"].map(PathBuf::from)
         );
     }
 
-    #[test]
-    fn add_uninlines_existing_file_with_tag() {
-        let existing_file = "foo-_bar";
-        test_add(
-            |fs| fs.create_file(existing_file, "").unwrap(),
-            "_baz",
-            "foo",
-            "foo/_baz",
-            |fs| {
-                assert!(fs.is_file("foo/_bar"));
-                assert!(!fs.is_file(existing_file));
-            },
-        );
-    }
+    #[proptest(cases = 20)]
+    fn add_organizes_files(
+        #[strategy(TaggedFileSystemWithMetadata::arbitrary_with(TaggedFilesParams {
+            min_files: 1, ..TaggedFilesParams::default()
+        }))]
+        args: TaggedFileSystemWithMetadata,
+        file_index: usize,
+        tag: Tag,
+    ) {
+        let filesystem = args.filesystem;
+        let tags = args.tags;
 
-    // `add` has several more conditions
-    // we could check for
-    // and implement:
-    //
-    // ```
-    // #[test]
-    // fn add_uses_non_parent_directory_if_it_exists_and_uninline_tag_matches() {
-    //     test_add(
-    //         |fs| {
-    //             fs.create_dir_all("foo/a").unwrap();
-    //             fs.create_file("a/_baz", "").unwrap();
-    //         },
-    //         "a/_bar",
-    //         "foo",
-    //         "foo/a/_bar",
-    //         |fs| {
-    //             assert!(fs.is_dir("a"));
-    //             assert!(fs.is_file("a/_baz"));
-    //         },
-    //     );
-    //     test_add(
-    //         |fs| {
-    //             fs.create_dir_all("a/foo/b").unwrap();
-    //             fs.create_file("a/b/_baz", "").unwrap();
-    //         },
-    //         "a/b/_bar",
-    //         "foo",
-    //         "a/foo/b/_bar",
-    //         |fs| {
-    //             assert!(fs.is_dir("a/b"));
-    //             assert!(fs.is_file("a/b/_baz"));
-    //         },
-    //     );
-    // }
-    //
-    // #[test]
-    // fn add_uses_non_parent_directory_if_it_exists_and_uninline_tag_matches_and_deletes_empty_dir(
-    // ) {
-    //     test_add(
-    //         |fs| fs.create_dir_all("foo/a").unwrap(),
-    //         "a/_bar",
-    //         "foo",
-    //         "foo/a/_bar",
-    //         |fs| assert!(!fs.is_dir("a")),
-    //     );
-    //     test_add(
-    //         |fs| fs.create_dir_all("a/foo/b").unwrap(),
-    //         "a/b/_bar",
-    //         "foo",
-    //         "a/foo/b/_bar",
-    //         |fs| assert!(!fs.is_dir("a/b")),
-    //     );
-    // }
-    //
-    // #[test]
-    // fn add_uses_non_parent_directory_if_it_exists_and_uninlines_tag() {
-    //     test_add(
-    //         |fs| fs.create_dir_all("foo/a").unwrap(),
-    //         "a-_bar",
-    //         "foo",
-    //         "foo/a/_bar",
-    //         |_| {},
-    //     );
-    // }
-    //
-    // #[test]
-    // fn add_uninlines_existing_parent_dir_with_tag() {
-    //     let existing_dir = "foo-bar";
-    //     let existing_file = "foo-bar/_baz";
-    //     test_add(
-    //         |fs| {
-    //             fs.create_dir(existing_dir).unwrap();
-    //             fs.create_file(existing_file, "").unwrap();
-    //         },
-    //         "_baz",
-    //         "foo",
-    //         "foo/_baz",
-    //         |fs| {
-    //             assert!(fs.is_dir("foo/bar"));
-    //             assert!(!fs.is_dir(existing_dir));
-    //             assert!(fs.is_file("foo/bar/_baz"));
-    //             assert!(!fs.is_file(existing_file));
-    //         },
-    //     );
-    // }
-    // ```
+        let files = list_files(&filesystem.fs);
+        let file = TaggedFile::from_path(files[file_index % files.len()].clone()).unwrap();
+        let tag = tags
+            .into_iter()
+            .find(|tag| !file.tags().contains(&tag.as_ref()))
+            .unwrap_or(tag);
 
-    fn test_add<F, FP>(pre: F, file: &str, tag: &str, expected: &str, post: FP)
-    where
-        F: FnOnce(&FakeFileSystem),
-        FP: FnOnce(&FakeFileSystem),
-    {
-        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
-        let file = TaggedFile::new(file.to_owned()).unwrap();
-        let tag = Tag::new(tag.to_owned()).unwrap();
+        let with_inline = TaggedFilesystem::new(clone_fake_fs(&filesystem.fs));
+        with_inline
+            .fs
+            .rename(&file, file.clone().add_inline_tag(&tag).unwrap().to)
+            .unwrap();
+        with_inline.organize().unwrap();
 
-        pre(&filesystem.fs);
-
-        make_file_and_parent(&filesystem.fs, &file);
-
-        assert!(filesystem.add(tag, [file.clone()]).is_ok());
-
-        assert!(filesystem.fs.is_file(expected));
-        assert!(!filesystem.fs.is_file(file));
-
-        post(&filesystem.fs);
+        filesystem.add(tag, [file]).unwrap();
+        prop_assert_eq!(list_files(&filesystem.fs), list_files(&with_inline.fs))
     }
 
     #[test]
     fn add_returns_error_if_file_already_has_tag() {
-        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
-
-        let tag = Tag::new("foo".to_owned()).unwrap();
         let file = TaggedFile::new("foo-_bar".to_owned()).unwrap();
-
-        filesystem.fs.create_file(&file, "").unwrap();
-
-        assert!(filesystem.add(tag, [file]).is_err());
+        let filesystem = fake_filesystem_with([&file]);
+        assert!(filesystem
+            .add(Tag::new("foo".to_owned()).unwrap(), [file])
+            .is_err());
     }
 
     #[test]
-    fn del_moves_file_if_file_has_tag() {
-        test_del("foo-_bar", "foo", "_bar");
-        test_del("foo/_bar", "foo", "_bar");
-        test_del("🙂/foo-_bar", "foo", "🙂/_bar");
+    fn add_returns_error_if_file_does_not_exist() {
+        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
+        assert!(filesystem
+            .add(
+                Tag::new("foo".to_owned()).unwrap(),
+                [TaggedFile::new("_bar".to_owned()).unwrap()]
+            )
+            .is_err());
     }
 
-    fn test_del(file: &str, tag: &str, expected: &str) {
-        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
-        let file = TaggedFile::new(file.to_owned()).unwrap();
-        let tag = Tag::new(tag.to_owned()).unwrap();
+    #[test]
+    fn del_renames_file_if_file_has_tag() {
+        let file = TaggedFile::new("foo-_bar".to_owned()).unwrap();
+        let filesystem = fake_filesystem_with([&file]);
+        filesystem
+            .del(Tag::new("foo".to_owned()).unwrap(), [file])
+            .unwrap();
+        assert_eq!(list_files(&filesystem.fs), ["_bar"].map(PathBuf::from));
+    }
 
-        make_file_and_parent(&filesystem.fs, &file);
+    #[test]
+    fn del_renames_all_files() {
+        let files = ["foo/_bar", "foo/_foo"];
+        let filesystem = fake_filesystem_with(files);
+        filesystem
+            .del(
+                Tag::new("foo".to_owned()).unwrap(),
+                files.map(|file| TaggedFile::new(file.to_owned()).unwrap()),
+            )
+            .unwrap();
+        assert_eq!(
+            list_files(&filesystem.fs),
+            ["_bar", "_foo"].map(PathBuf::from)
+        );
+    }
 
-        assert!(filesystem.del(tag, [file.clone()]).is_ok());
+    #[proptest(cases = 20)]
+    fn del_organizes_files(
+        #[strategy(TaggedFilesystem::<FakeFileSystem>::arbitrary_with(TaggedFilesParams {
+            min_tags: 1, min_files: 1, ..TaggedFilesParams::default()
+        }))]
+        filesystem: TaggedFilesystem<FakeFileSystem>,
+        file_index: usize,
+        tag_index: usize,
+    ) {
+        let files = list_files(&filesystem.fs);
+        let file = TaggedFile::from_path(files[file_index % files.len()].clone()).unwrap();
+        let tag = file
+            .tags()
+            .nth(tag_index % file.tags_len())
+            .unwrap()
+            .to_owned();
 
-        assert!(filesystem.fs.is_file(expected));
-        assert!(!filesystem.fs.is_file(file));
+        let without_tag = TaggedFilesystem::new(clone_fake_fs(&filesystem.fs));
+        without_tag
+            .apply_all(from_move_ops(vec![file.clone().del_tag(&tag).unwrap()]))
+            .unwrap();
+        without_tag.organize().unwrap();
+
+        filesystem.del(tag, [file]).unwrap();
+        prop_assert_eq!(list_files(&filesystem.fs), list_files(&without_tag.fs))
     }
 
     #[test]
     fn del_returns_error_if_file_lacks_tag() {
-        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
-
-        let tag = Tag::new("foo".to_owned()).unwrap();
         let file = TaggedFile::new("_bar".to_owned()).unwrap();
-
-        filesystem.fs.create_file(&file, "").unwrap();
-
-        assert!(filesystem.del(tag, [file]).is_err());
+        let filesystem = fake_filesystem_with([&file]);
+        assert!(filesystem
+            .del(Tag::new("foo".to_owned()).unwrap(), [file])
+            .is_err());
     }
 
     #[test]
-    fn path_returns_file_if_valid() {
+    fn del_returns_error_if_file_does_not_exist() {
+        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
+        assert!(filesystem
+            .del(
+                Tag::new("foo".to_owned()).unwrap(),
+                [TaggedFile::new("foo-_bar".to_owned()).unwrap()]
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn path_returns_path_if_valid() {
         let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
         assert_eq!(
-            filesystem.path(
-                [
-                    Tag::new("foo".to_owned()).unwrap(),
-                    Tag::new("bar".to_owned()).unwrap()
-                ],
-                "baz"
-            ),
-            Ok(TaggedFile::new("foo-bar-_baz".to_owned()).unwrap())
+            filesystem
+                .path(
+                    [
+                        Tag::new("foo".to_owned()).unwrap(),
+                        Tag::new("bar".to_owned()).unwrap()
+                    ],
+                    "baz"
+                )
+                .unwrap(),
+            PathBuf::from("bar-foo-_baz")
         );
+    }
+
+    #[proptest(cases = 20)]
+    fn path_organizes_files(
+        #[strategy(TaggedFilesystem::<FakeFileSystem>::arbitrary_with(TaggedFilesParams {
+            min_files: 1, ..TaggedFilesParams::default()
+        }))]
+        filesystem: TaggedFilesystem<FakeFileSystem>,
+        file_index: usize,
+    ) {
+        let files = list_files(&filesystem.fs);
+        let file = TaggedFile::from_path(files[file_index % files.len()].clone()).unwrap();
+
+        let without_file = TaggedFilesystem::new(clone_fake_fs(&filesystem.fs));
+        without_file.fs.remove_file(&file).unwrap();
+        for path in file.as_path().ancestors().skip(1) {
+            let _ = without_file.fs.remove_dir(path); // Only remove if empty.
+        }
+
+        filesystem.organize().unwrap();
+
+        let path = without_file
+            .path(file.tags().map(|tag| tag.to_owned()), file.name())
+            .unwrap();
+        without_file.fs.create_file(path, "").unwrap();
+        prop_assert_eq!(list_files(&without_file.fs), list_files(&filesystem.fs))
+    }
+
+    #[proptest(cases = 20)]
+    fn path_returns_path_if_file_already_exists(
+        #[strategy(TaggedFilesystem::<FakeFileSystem>::arbitrary_with(TaggedFilesParams {
+            min_files: 1, ..TaggedFilesParams::default()
+        }))]
+        filesystem: TaggedFilesystem<FakeFileSystem>,
+        file_index: usize,
+    ) {
+        filesystem.organize().unwrap();
+        let files = list_files(&filesystem.fs);
+        let file = TaggedFile::from_path(files[file_index % files.len()].clone()).unwrap();
+        prop_assert_eq!(
+            filesystem
+                .path(file.tags().map(|tag| tag.to_owned()), file.name())
+                .unwrap(),
+            file.as_path()
+        )
     }
 
     #[test]
@@ -669,10 +706,10 @@ mod tests {
     #[proptest(cases = 20)]
     fn organize_ignores_nested_tagged_files(
         #[strategy(
-            tagged_files_strategy(10, 10, 10)
+            tagged_files_strategy(TaggedFilesParams { max_tag_set: 10, max_files: 10, ..TaggedFilesParams::default() })
                 .prop_flat_map(|files| {
                     (
-                        vec(tagged_files_strategy(10, 10, 10),
+                        vec(tagged_files_strategy(TaggedFilesParams { max_tag_set: 10, max_files: 10, ..TaggedFilesParams::default() }),
                         files.len()), Just(files)
                     )
                 })
@@ -762,6 +799,14 @@ mod tests {
 
         filesystem.organize().unwrap();
         assert_eq!(list_files(&filesystem.fs), files)
+    }
+
+    fn clone_fake_fs(fs: &FakeFileSystem) -> FakeFileSystem {
+        let new_fs = FakeFileSystem::new();
+        for file in list_files(fs) {
+            make_file_and_parent(&new_fs, file)
+        }
+        new_fs
     }
 
     fn list_files(fs: &FakeFileSystem) -> Vec<PathBuf> {

@@ -70,20 +70,6 @@ impl NewError {
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
-#[error("{0}")]
-pub enum InlineTagError {
-    LacksTag(#[from] LacksTagError),
-    AlreadyInline(#[from] AlreadyInlineError),
-}
-
-#[derive(Debug, PartialEq, thiserror::Error)]
-#[error("{0}")]
-pub enum UninlineTagError {
-    LacksTag(#[from] LacksTagError),
-    AlreadyUninline(#[from] AlreadyUninlineError),
-}
-
-#[derive(Debug, PartialEq, thiserror::Error)]
 #[error("`{0}` already has `{1}`")]
 pub struct HasTagError(TaggedFile, String);
 
@@ -101,32 +87,6 @@ impl HasTagError {
 pub struct LacksTagError(TaggedFile, String);
 
 impl LacksTagError {
-    fn new<T>(file: TaggedFile, tag: T) -> Self
-    where
-        T: AsRef<TagRef>,
-    {
-        Self(file, tag.as_ref().to_string())
-    }
-}
-
-#[derive(Debug, PartialEq, thiserror::Error)]
-#[error("`{0}` already has `{1}` inline")]
-pub struct AlreadyInlineError(TaggedFile, String);
-
-impl AlreadyInlineError {
-    fn new<T>(file: TaggedFile, tag: T) -> Self
-    where
-        T: AsRef<TagRef>,
-    {
-        Self(file, tag.as_ref().to_string())
-    }
-}
-
-#[derive(Debug, PartialEq, thiserror::Error)]
-#[error("`{0}` already has `{1}` as a directory-tag")]
-pub struct AlreadyUninlineError(TaggedFile, String);
-
-impl AlreadyUninlineError {
     fn new<T>(file: TaggedFile, tag: T) -> Self
     where
         T: AsRef<TagRef>,
@@ -264,58 +224,6 @@ impl TaggedFile {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn inline_tag<T>(self, tag: T) -> Result<MoveOp, InlineTagError>
-    where
-        T: AsRef<TagRef>,
-    {
-        match self.indices_of(&tag) {
-            Some(tag_indices) => {
-                if self.separator_of(tag_indices) == INLINE_SEPARATOR {
-                    Err(AlreadyInlineError::new(self, tag).into())
-                } else {
-                    Ok(MoveOp {
-                        to: format!(
-                            "{}{}{}",
-                            self.path_up_to_including(tag_indices),
-                            INLINE_SEPARATOR,
-                            self.path_after(tag_indices),
-                        )
-                        .into(),
-                        from: self.into(),
-                    })
-                }
-            }
-            None => Err(LacksTagError::new(self, tag).into()),
-        }
-    }
-
-    pub(crate) fn uninline_tag<T>(self, tag: T) -> Result<MoveOp, UninlineTagError>
-    where
-        T: AsRef<TagRef>,
-    {
-        let tag_indices = self.indices_of(&tag);
-        match tag_indices {
-            Some(tag_indices) => {
-                if self.separator_of(tag_indices) == DIR_SEPARATOR {
-                    Err(AlreadyUninlineError::new(self, tag).into())
-                } else {
-                    Ok(MoveOp {
-                        to: format!(
-                            "{}{}{}",
-                            self.path_up_to_including(tag_indices),
-                            DIR_SEPARATOR,
-                            self.path_after(tag_indices),
-                        )
-                        .into(),
-                        from: self.into(),
-                    })
-                }
-            }
-            None => Err(LacksTagError::new(self, tag).into()),
-        }
-    }
-
     /// Return indices corresponding to the given tag
     /// if this file has the tag.
     fn indices_of<T>(&self, tag: T) -> Option<TagIndices>
@@ -343,23 +251,6 @@ impl TaggedFile {
         // This is safe
         // because we know `x.0` is the start of a character
         unsafe { self.path.get_unchecked(..x.0) }
-    }
-
-    /// Return the path
-    /// from the beginning of the file
-    /// to the end of tag or name
-    /// corresponding to the given indices.
-    /// when used on a tag,
-    /// this does not include the separator
-    /// following the tag.
-    fn path_up_to_including<T>(&self, x: T) -> &str
-    where
-        T: Into<SliceIndices>,
-    {
-        let x = x.into();
-        // This is safe
-        // because we know `x.1` is the start of a character.
-        unsafe { self.path.get_unchecked(..x.1) }
     }
 
     /// Return the path
@@ -558,78 +449,6 @@ mod tests {
         assert!(TaggedFile::new("foo-_bar".to_owned())
             .unwrap()
             .del_tag(Tag::new("baz".to_owned()).unwrap())
-            .is_err());
-    }
-
-    #[test]
-    fn inline_tag_returns_path_with_tag_inline() {
-        test_inline_tag("foo/_bar", "foo", "foo-_bar");
-        test_inline_tag("foo/baz-_bar", "foo", "foo-baz-_bar");
-        test_inline_tag("foo/baz/_bar", "baz", "foo/baz-_bar");
-        test_inline_tag("🙂/🙁/_bar", "🙁", "🙂/🙁-_bar");
-    }
-
-    fn test_inline_tag(file: &str, tag: &str, expected_to: &str) {
-        assert_eq!(
-            TaggedFile::new(file.to_owned())
-                .unwrap()
-                .inline_tag(Tag::new(tag.to_owned()).unwrap()),
-            Ok(MoveOp {
-                from: file.into(),
-                to: expected_to.into()
-            })
-        );
-    }
-
-    #[test]
-    fn inline_tag_returns_err_if_file_lacks_tag() {
-        assert!(TaggedFile::new("foo/_bar".to_owned())
-            .unwrap()
-            .inline_tag(Tag::new("baz".to_owned()).unwrap())
-            .is_err());
-    }
-
-    #[test]
-    fn inline_tag_returns_err_if_tag_is_already_inline() {
-        assert!(TaggedFile::new("foo-_bar".to_owned())
-            .unwrap()
-            .inline_tag(Tag::new("foo".to_owned()).unwrap())
-            .is_err());
-    }
-
-    #[test]
-    fn uninline_tag_returns_path_with_tag_as_dir() {
-        test_uninline_tag("foo-_bar", "foo", "foo/_bar");
-        test_uninline_tag("foo-baz-_bar", "foo", "foo/baz-_bar");
-        test_uninline_tag("foo/baz-_bar", "baz", "foo/baz/_bar");
-        test_uninline_tag("🙂/🙁-_bar", "🙁", "🙂/🙁/_bar");
-    }
-
-    fn test_uninline_tag(file: &str, tag: &str, expected_to: &str) {
-        assert_eq!(
-            TaggedFile::new(file.to_owned())
-                .unwrap()
-                .uninline_tag(Tag::new(tag.to_owned()).unwrap()),
-            Ok(MoveOp {
-                from: file.into(),
-                to: expected_to.into()
-            })
-        );
-    }
-
-    #[test]
-    fn uninline_tag_returns_err_if_file_lacks_tag() {
-        assert!(TaggedFile::new("foo-_bar".to_owned())
-            .unwrap()
-            .uninline_tag(Tag::new("baz".to_owned()).unwrap())
-            .is_err());
-    }
-
-    #[test]
-    fn uninline_tag_returns_err_if_tag_is_already_dir() {
-        assert!(TaggedFile::new("foo/_bar".to_owned())
-            .unwrap()
-            .uninline_tag(Tag::new("foo".to_owned()).unwrap())
             .is_err());
     }
 }

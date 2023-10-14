@@ -4,7 +4,7 @@ use filesystem::{FakeFileSystem, FileSystem};
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use proptest::{
-    collection::btree_set,
+    collection::hash_set,
     prelude::{prop::collection::vec, *},
 };
 
@@ -21,64 +21,120 @@ lazy_static! {
     static ref NAME_REGEX: String = format!("[^{DIR_SEPARATOR}]{{0,16}}");
 }
 
-impl Arbitrary for TaggedFilesystem<FakeFileSystem> {
-    type Parameters = ();
+#[derive(Debug)]
+pub struct TaggedFileSystemWithMetadata {
+    pub filesystem: TaggedFilesystem<FakeFileSystem>,
+    pub tags: Vec<Tag>,
+}
+
+impl Arbitrary for TaggedFileSystemWithMetadata {
+    type Parameters = TaggedFilesParams;
     type Strategy = BoxedStrategy<Self>;
 
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        tagged_files_strategy(100, 10, 100)
-            .prop_map(|files| {
-                let fs = FakeFileSystem::new();
-                for file in files.iter() {
-                    make_file_and_parent(&fs, file.as_path());
-                }
-                TaggedFilesystem::new(fs)
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+        tagged_files_with_metadata_strategy(params)
+            .prop_map(|(files, tags)| Self {
+                filesystem: fake_filesystem_with(files),
+                tags,
             })
             .boxed()
     }
 }
 
-pub fn tagged_files_strategy(
-    max_tag_set_size: usize,
-    max_tags: usize,
-    max_files: usize,
-) -> BoxedStrategy<Vec<TaggedFile>> {
-    btree_set(Tag::arbitrary(), 1..=max_tag_set_size)
+pub struct TaggedFilesParams {
+    pub min_tag_set: usize,
+    pub max_tag_set: usize,
+    pub min_tags: usize,
+    pub max_tags: usize,
+    pub min_files: usize,
+    pub max_files: usize,
+}
+
+impl Default for TaggedFilesParams {
+    fn default() -> Self {
+        Self {
+            min_tag_set: 1,
+            max_tag_set: 100,
+            min_tags: 0,
+            max_tags: 10,
+            min_files: 0,
+            max_files: 100,
+        }
+    }
+}
+
+impl Arbitrary for TaggedFilesystem<FakeFileSystem> {
+    type Parameters = TaggedFilesParams;
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+        tagged_files_strategy(params)
+            .prop_map(fake_filesystem_with)
+            .boxed()
+    }
+}
+
+pub fn fake_filesystem_with<P>(
+    files: impl IntoIterator<Item = P>,
+) -> TaggedFilesystem<FakeFileSystem>
+where
+    P: AsRef<Path>,
+{
+    let fs = FakeFileSystem::new();
+    for file in files.into_iter() {
+        make_file_and_parent(&fs, file.as_ref());
+    }
+    TaggedFilesystem::new(fs)
+}
+
+pub fn tagged_files_strategy(params: TaggedFilesParams) -> BoxedStrategy<Vec<TaggedFile>> {
+    tagged_files_with_metadata_strategy(params)
+        .prop_map(|(files, _)| files)
+        .boxed()
+}
+
+fn tagged_files_with_metadata_strategy(
+    params: TaggedFilesParams,
+) -> BoxedStrategy<(Vec<TaggedFile>, Vec<Tag>)> {
+    hash_set(Tag::arbitrary(), params.min_tag_set..=params.max_tag_set)
         .prop_map(|set| set.into_iter().collect_vec())
         .prop_flat_map(move |tags| {
-            vec(
-                // We use a `vec` instead of a `btree_set`
-                // because we want these unsorted.
-                vec(0..tags.len(), 0..=max_tags)
-                    .prop_map(move |indices| {
-                        indices
-                            .into_iter()
-                            .unique()
-                            .map(|i| tags[i].clone())
-                            .collect_vec()
-                    })
-                    .prop_flat_map(|tags| {
-                        (
-                            NAME_REGEX.as_str(),
-                            vec(SEPARATOR_REGEX.as_str(), tags.len()).prop_map(|xs| {
-                                xs.into_iter()
-                                    .map(|s| s.chars().next().expect("at least one character"))
-                                    .collect()
-                            }),
-                        )
-                            .prop_map(move |(name, seps)| {
-                                TaggedFile::from(RawTaggedFile {
-                                    name,
-                                    tags: tags.clone(),
-                                    seps,
+            let tags_ = tags.clone();
+            (
+                vec(
+                    // We use a `vec` because we want these unsorted.
+                    vec(0..tags.len(), params.min_tags..=params.max_tags)
+                        .prop_map(move |indices| {
+                            indices
+                                .into_iter()
+                                .unique()
+                                .map(|i| tags_[i].clone())
+                                .collect_vec()
+                        })
+                        .prop_flat_map(|tags| {
+                            (
+                                NAME_REGEX.as_str(),
+                                vec(SEPARATOR_REGEX.as_str(), tags.len()).prop_map(|xs| {
+                                    xs.into_iter()
+                                        .map(|s| s.chars().next().expect("at least one character"))
+                                        .collect()
+                                }),
+                            )
+                                .prop_map(move |(name, seps)| {
+                                    TaggedFile::from(RawTaggedFile {
+                                        name,
+                                        tags: tags.clone(),
+                                        seps,
+                                    })
                                 })
-                            })
-                    }),
-                0..=max_files,
+                        }),
+                    params.min_files..=params.max_files,
+                )
+                .prop_filter("duplicate files", |files| {
+                    files.iter().map(TagSetTaggedFile::new).all_unique()
+                }),
+                Just(tags),
             )
-            .prop_filter("duplicate files", |files| {
-                files.iter().map(TagSetTaggedFile::new).all_unique()
-            })
         })
         .boxed()
 }
