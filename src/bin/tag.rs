@@ -21,7 +21,7 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Add tags to files
+    /// Add tags to files and print new paths
     Add {
         /// Tag to add
         #[clap(required = true, value_name = "TAG", value_parser = tag_parser)]
@@ -31,7 +31,7 @@ enum Commands {
         #[clap(required = true, value_name = "FILE", value_parser = tagged_file_parser)]
         files: Vec<TaggedFile>,
     },
-    /// Delete tags from files
+    /// Delete tags from files and print new paths
     Del {
         /// Tag to delete
         #[clap(required = true, value_name = "TAG", value_parser = tag_parser)]
@@ -83,19 +83,20 @@ fn main() -> anyhow::Result<()> {
         .dry_run(args.dry_run)
         .verbose(args.verbose)
         .build();
-    match args.command {
+    for path in match args.command {
         Some(Commands::Add { tag, files }) => filesystem.add(tag, files)?,
         Some(Commands::Del { tag, files }) => filesystem.del(tag, files)?,
-        Some(Commands::Path { tags, name }) => {
-            // `display()` should be fine
-            // because invalid unicode should crash before here.
-            println!("{}", filesystem.path(tags, name)?.display())
-        }
+        Some(Commands::Path { tags, name }) => vec![filesystem.path(tags, name)?],
         Some(Commands::Organize { path }) => {
             std::env::set_current_dir(path)?;
-            filesystem.organize()?
+            filesystem.organize()?;
+            Vec::new()
         }
-        None => (),
+        None => Vec::new(),
+    } {
+        // `display()` should not affect results
+        // because invalid unicode should error before here.
+        println!("{}", path.display())
     }
 
     Ok(())

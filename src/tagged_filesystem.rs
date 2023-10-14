@@ -121,7 +121,7 @@ where
         &self,
         tag: Tag,
         files: impl IntoIterator<Item = TaggedFile>,
-    ) -> Result<(), AddError> {
+    ) -> Result<Vec<PathBuf>, AddError> {
         Ok(self.move_and_organize(
             files
                 .into_iter()
@@ -134,7 +134,7 @@ where
         &self,
         tag: Tag,
         files: impl IntoIterator<Item = TaggedFile>,
-    ) -> Result<(), DelError> {
+    ) -> Result<Vec<PathBuf>, DelError> {
         Ok(self.move_and_organize(
             files
                 .into_iter()
@@ -204,7 +204,10 @@ where
         Ok(())
     }
 
-    fn move_and_organize(&self, move_ops: Vec<MoveOp>) -> Result<(), MoveAndOrganizeError> {
+    fn move_and_organize(
+        &self,
+        move_ops: Vec<MoveOp>,
+    ) -> Result<Vec<PathBuf>, MoveAndOrganizeError> {
         let mut files = self.find_tagged_files("".into())?;
         for op in move_ops.iter() {
             match files.iter_mut().find(|file| file.as_path() == op.from) {
@@ -217,18 +220,28 @@ where
         }
 
         let mut organized_move_ops = organize(&files);
-        for op in move_ops {
-            match organized_move_ops
-                .iter_mut()
-                .find(|other| other.from == op.to)
-            {
-                Some(file) => file.from = op.from,
-                None => organized_move_ops.push(op),
-            }
-        }
+        let new_paths = move_ops
+            .into_iter()
+            .map(|op| {
+                match organized_move_ops
+                    .iter_mut()
+                    .find(|other| other.from == op.to)
+                {
+                    Some(other) => {
+                        other.from = op.from;
+                        other.to.clone()
+                    }
+                    None => {
+                        let to = op.to.clone();
+                        organized_move_ops.push(op);
+                        to
+                    }
+                }
+            })
+            .collect();
 
         self.apply_all(from_move_ops(organized_move_ops))?;
-        Ok(())
+        Ok(new_paths)
     }
 
     fn find_tagged_files(&self, root: PathBuf) -> std::io::Result<Vec<TaggedFile>> {
