@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, fmt, path::Path};
 
 use filesystem::{FakeFileSystem, FileSystem};
 use itertools::Itertools;
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use proptest::{
     collection::hash_set,
     prelude::{prop::collection::vec, *},
@@ -10,16 +10,16 @@ use proptest::{
 
 use crate::{Tag, TagRef, TaggedFile, TaggedFilesystem, DIR_SEPARATOR, SEPARATORS, TAG_END};
 
-lazy_static! {
-    pub static ref SEPARATORS_STRING: String = SEPARATORS.iter().collect();
-    static ref SEPARATORS_AND_ENDS: String = format!("{}{TAG_END}", *SEPARATORS_STRING);
-    static ref SEPARATOR_REGEX: String = format!("[{}]", *SEPARATORS_STRING);
-    pub static ref TAG_REGEX: String = format!(
+pub static SEPARATORS_STRING: Lazy<String> = Lazy::new(|| SEPARATORS.iter().collect());
+static SEPARATORS_AND_ENDS: Lazy<String> = Lazy::new(|| format!("{}{TAG_END}", *SEPARATORS_STRING));
+static SEPARATOR_REGEX: Lazy<String> = Lazy::new(|| format!("[{}]", *SEPARATORS_STRING));
+pub static TAG_REGEX: Lazy<String> = Lazy::new(|| {
+    format!(
         "[^{}.][^{}]{{1,16}}",
         *SEPARATORS_AND_ENDS, *SEPARATORS_STRING
-    );
-    pub static ref NAME_REGEX: String = format!("[^{DIR_SEPARATOR}]{{0,16}}");
-}
+    )
+});
+pub static NAME_REGEX: Lazy<String> = Lazy::new(|| format!("[^{DIR_SEPARATOR}]{{0,16}}"));
 
 #[derive(Debug)]
 pub struct TaggedFileSystemWithMetadata {

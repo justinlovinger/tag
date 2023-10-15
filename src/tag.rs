@@ -113,7 +113,7 @@ impl ToOwned for TagRef {
 
 #[cfg(test)]
 mod tests {
-    use lazy_static::lazy_static;
+    use once_cell::sync::Lazy;
     use proptest::prelude::*;
     use test_strategy::proptest;
 
@@ -165,10 +165,9 @@ mod tests {
         prop_assert!(Tag::new(s).is_none());
     }
 
-    lazy_static! {
-        static ref STARTS_WITH_DOT: String = format!(r"\.{}", *TAG_REGEX);
-        static ref STARTS_WITH_TAG_END_REGEX: String = format!(r"{TAG_END}{}", *TAG_REGEX);
-        static ref TAG_WITH_SEP_REGEX: String =
-            format!(r"{}[{}]{}", *TAG_REGEX, *SEPARATORS_STRING, *TAG_REGEX);
-    }
+    static STARTS_WITH_DOT: Lazy<String> = Lazy::new(|| format!(r"\.{}", *TAG_REGEX));
+    static STARTS_WITH_TAG_END_REGEX: Lazy<String> =
+        Lazy::new(|| format!(r"{TAG_END}{}", *TAG_REGEX));
+    static TAG_WITH_SEP_REGEX: Lazy<String> =
+        Lazy::new(|| format!(r"{}[{}]{}", *TAG_REGEX, *SEPARATORS_STRING, *TAG_REGEX));
 }

@@ -313,7 +313,7 @@ impl AsRef<str> for TaggedFile {
 
 #[cfg(test)]
 mod tests {
-    use lazy_static::lazy_static;
+    use once_cell::sync::Lazy;
     use proptest::prelude::*;
     use test_strategy::proptest;
 
@@ -470,10 +470,10 @@ mod tests {
             .is_err());
     }
 
-    lazy_static! {
-        static ref MAYBE_TAGGED_FILE: String = format!(
+    static MAYBE_TAGGED_FILE: Lazy<String> = Lazy::new(|| {
+        format!(
             r"\PC{{0,16}}[{}]{TAG_END}{}",
             *SEPARATORS_STRING, *NAME_REGEX
-        );
-    }
+        )
+    });
 }
