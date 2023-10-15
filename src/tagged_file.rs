@@ -99,43 +99,42 @@ impl TaggedFile {
     pub fn new(path: String) -> Result<TaggedFile, NewError> {
         let mut tags = Vec::new();
         let mut tag_start = 0;
-        let mut valid = false;
         for (i, c) in path.char_indices() {
-            if SEPARATORS.contains(&c) {
-                if valid {
-                    tags.push(TagIndices(tag_start, i));
-                } else {
+            if i == tag_start {
+                if c == TAG_END {
+                    let file = TaggedFile {
+                        // Exclude tag-end from name.
+                        name: SliceIndices(i + c.len_utf8(), path.len()),
+                        path,
+                        tags,
+                    };
+                    return if !file.tags_unique() || file.name().contains(DIR_SEPARATOR) {
+                        Err(NewError(file.path))
+                    } else {
+                        Ok(file)
+                    };
+                } else if SEPARATORS.contains(&c) || c == '.' {
+                    // Tag is empty if `c` is separator.
                     return Err(NewError(path));
                 }
-                valid = false;
+            } else if SEPARATORS.contains(&c) {
+                tags.push(TagIndices(tag_start, i));
                 // Skip this separator
                 // for the start of the next tag.
                 tag_start = i + c.len_utf8();
-            } else if c == TAG_END && i == tag_start {
-                let file = TaggedFile {
-                    // Do not include tag-end in name.
-                    name: SliceIndices(i + c.len_utf8(), path.len()),
-                    path,
-                    tags,
-                };
-                return if file.tags_unique() {
-                    Ok(file)
-                } else {
-                    Err(NewError(file.path))
-                };
-            } else if c != '.' {
-                // A valid tag must have at least one non-'.' character.
-                valid = true;
             }
         }
         Err(NewError(path))
     }
 
     fn tags_unique(&self) -> bool {
-        for i in 0..self.tags.len().saturating_sub(1) {
-            // This is safe
-            // because `i` is generated from a safe range of `tags`.
-            let tag = unsafe { self.tags().nth(i).unwrap_unchecked() };
+        // A nested loop is faster than a hash-set
+        // on small lists.
+        for (i, tag) in self
+            .tags()
+            .take(self.tags_len().saturating_sub(1))
+            .enumerate()
+        {
             for other_tag in self.tags().skip(i + 1) {
                 if tag == other_tag {
                     return false;
@@ -314,6 +313,7 @@ impl AsRef<str> for TaggedFile {
 
 #[cfg(test)]
 mod tests {
+    use lazy_static::lazy_static;
     use proptest::prelude::*;
     use test_strategy::proptest;
 
@@ -334,7 +334,18 @@ mod tests {
     }
 
     #[proptest]
-    fn new_returns_ok_for_non_tagged_files(s: String) {
+    fn new_returns_ok_iff_all_tags_are_valid(#[strategy(MAYBE_TAGGED_FILE.as_str())] s: String) {
+        // This test intentionally allows some invalid files
+        // to ensure a wide variety of files are tested.
+        if let Ok(file) = TaggedFile::new(s) {
+            for tag in file.tags() {
+                prop_assert!(Tag::new(tag.to_string()).is_some())
+            }
+        }
+    }
+
+    #[proptest]
+    fn new_returns_err_for_non_tagged_files(s: String) {
         prop_assume!(
             !(s.starts_with(TAG_END)
                 || SEPARATORS
@@ -355,11 +366,11 @@ mod tests {
     }
 
     #[test]
-    fn new_returns_err_for_all_dot_tags() {
+    fn new_returns_err_for_tags_starting_with_dot() {
         assert!(TaggedFile::new(".-_baz".to_owned()).is_err());
-        assert!(TaggedFile::new("..-_baz".to_owned()).is_err());
+        assert!(TaggedFile::new(".bar-_baz".to_owned()).is_err());
         assert!(TaggedFile::new("foo-.-_baz".to_owned()).is_err());
-        assert!(TaggedFile::new("foo-..-_baz".to_owned()).is_err());
+        assert!(TaggedFile::new("foo-.bar-_baz".to_owned()).is_err());
     }
 
     #[test]
@@ -368,6 +379,13 @@ mod tests {
         assert!(TaggedFile::new("foo/foo/_baz".to_owned()).is_err());
         assert!(TaggedFile::new("foo-bar/foo/_baz".to_owned()).is_err());
         assert!(TaggedFile::new("bar/foo-foo/_baz".to_owned()).is_err());
+    }
+
+    #[test]
+    fn new_returns_err_if_name_contains_dir_separator() {
+        assert!(TaggedFile::new("foo-_baz/biz".to_owned()).is_err());
+        assert!(TaggedFile::new("foo/_/".to_owned()).is_err());
+        assert!(TaggedFile::new("foo/_/baz".to_owned()).is_err());
     }
 
     #[proptest]
@@ -450,5 +468,12 @@ mod tests {
             .unwrap()
             .del_tag(Tag::new("baz".to_owned()).unwrap())
             .is_err());
+    }
+
+    lazy_static! {
+        static ref MAYBE_TAGGED_FILE: String = format!(
+            r"\PC{{0,16}}[{}]{TAG_END}{}",
+            *SEPARATORS_STRING, *NAME_REGEX
+        );
     }
 }

@@ -14,11 +14,11 @@ lazy_static! {
     pub static ref SEPARATORS_STRING: String = SEPARATORS.iter().collect();
     static ref SEPARATORS_AND_ENDS: String = format!("{}{TAG_END}", *SEPARATORS_STRING);
     static ref SEPARATOR_REGEX: String = format!("[{}]", *SEPARATORS_STRING);
-    static ref TAG_REGEX: String = format!(
-        "[^{}][^{}]{{0,16}}",
+    pub static ref TAG_REGEX: String = format!(
+        "[^{}.][^{}]{{1,16}}",
         *SEPARATORS_AND_ENDS, *SEPARATORS_STRING
     );
-    static ref NAME_REGEX: String = format!("[^{DIR_SEPARATOR}]{{0,16}}");
+    pub static ref NAME_REGEX: String = format!("[^{DIR_SEPARATOR}]{{0,16}}");
 }
 
 #[derive(Debug)]
@@ -230,7 +230,6 @@ impl Arbitrary for Tag {
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         TAG_REGEX
             .as_str()
-            .prop_filter("all characters were '.'", |s| s.chars().any(|c| c != '.'))
             .prop_map(|x| Self::new(x).unwrap())
             .boxed()
     }

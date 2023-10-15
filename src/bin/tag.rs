@@ -81,7 +81,7 @@ enum Commands {
 
 fn tag_parser(s: &str) -> Result<Tag, String> {
     Tag::new(s.to_owned()).ok_or(format!(
-        "tags cannot start with `{TAG_END}`, contain `{INLINE_SEPARATOR}` or `{DIR_SEPARATOR}`, or consist of only '.'"
+        "tags cannot start with `.` or `{TAG_END}` or contain `{INLINE_SEPARATOR}` or `{DIR_SEPARATOR}`"
     ))
 }
 

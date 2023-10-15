@@ -248,13 +248,14 @@ where
         let mut dirs = vec![root];
         let mut files = Vec::new();
         while let Some(dir) = dirs.pop() {
-            for file in self.sane_read_dir(dir)? {
-                match TaggedFile::from_path(file?) {
-                    Ok(x) => files.push(x),
-                    Err(x) => {
-                        let x = x.into_path();
-                        if self.fs.is_dir(&x) {
-                            dirs.push(x);
+            for path in self.sane_read_dir(dir)? {
+                let path = path?;
+                match TaggedFile::from_path(path) {
+                    Ok(file) => files.push(file),
+                    Err(e) => {
+                        let path = e.into_path();
+                        if self.fs.is_dir(&path) {
+                            dirs.push(path);
                         }
                     }
                 }
@@ -777,6 +778,21 @@ mod tests {
             BTreeSet::from_iter(organized_files.iter().map(TagSetTaggedFile::new)),
             BTreeSet::from_iter(files.iter().map(TagSetTaggedFile::new))
         );
+    }
+
+    #[proptest(cases = 20)]
+    fn organize_ignores_hidden_files(filesystem: TaggedFilesystem<FakeFileSystem>) {
+        for path in filesystem.fs.read_dir("").unwrap() {
+            let path = path.unwrap().path();
+            filesystem
+                .fs
+                .rename(&path, format!(".{}", path.display()))
+                .unwrap();
+        }
+
+        let files = list_files(&filesystem.fs);
+        filesystem.organize().unwrap();
+        prop_assert_eq!(list_files(&filesystem.fs), files);
     }
 
     #[test]
