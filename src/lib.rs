@@ -1,5 +1,3 @@
-#![allow(clippy::needless_borrow)] // False positives
-
 mod organize;
 mod tag;
 mod tagged_file;
