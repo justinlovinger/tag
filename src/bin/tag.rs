@@ -22,6 +22,9 @@ struct Args {
 #[derive(Subcommand)]
 enum Commands {
     /// Add tags to files and print new paths
+    ///
+    /// All tagged files under the working directory are organized
+    /// in the process.
     Add {
         /// Tag to add
         #[clap(required = true, value_name = "TAG", value_parser = tag_parser)]
@@ -32,6 +35,9 @@ enum Commands {
         files: Vec<TaggedFile>,
     },
     /// Delete tags from files and print new paths
+    ///
+    /// All tagged files under the working directory are organized
+    /// in the process.
     Del {
         /// Tag to delete
         #[clap(required = true, value_name = "TAG", value_parser = tag_parser)]
@@ -42,6 +48,13 @@ enum Commands {
         files: Vec<TaggedFile>,
     },
     /// Print path of file with given tags and name
+    ///
+    /// All tagged files under the working directory are organized
+    /// in the process.
+    /// If no file exists with the given tags and name,
+    /// files are organized
+    /// as if such a file existed,
+    /// thereby ensuring the path is valid.
     #[command(allow_missing_positional = true)]
     Path {
         #[clap(value_name = "TAG", value_parser = tag_parser)]
