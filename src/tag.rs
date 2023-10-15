@@ -114,7 +114,7 @@ impl ToOwned for TagRef {
 #[cfg(test)]
 mod tests {
     use lazy_static::lazy_static;
-    use proptest::{prelude::*, test_runner::FileFailurePersistence};
+    use proptest::prelude::*;
     use test_strategy::proptest;
 
     use crate::testing::*;
@@ -126,21 +126,21 @@ mod tests {
         assert!(Tag::new(String::new()).is_none());
     }
 
-    #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    #[proptest]
     fn new_returns_none_for_strings_starting_with_tag_end(
         #[strategy(STARTS_WITH_TAG_END_REGEX.as_str())] s: String,
     ) {
         prop_assert!(Tag::new(s).is_none());
     }
 
-    #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    #[proptest]
     fn new_returns_none_for_strings_containing_a_separator(
         #[strategy(TAG_WITH_SEP_REGEX.as_str())] s: String,
     ) {
         prop_assert!(Tag::new(s).is_none());
     }
 
-    #[proptest(failure_persistence = Some(Box::new(FileFailurePersistence::Off)))]
+    #[proptest]
     fn new_returns_none_for_strings_containing_only_dot(#[strategy(r"\.+")] s: String) {
         prop_assert!(Tag::new(s).is_none());
     }
