@@ -348,9 +348,8 @@ where
     where
         P: AsRef<Path>,
     {
-        let path = path.as_ref();
         #[auto_enum(Iterator)]
-        let it = if path.as_os_str().is_empty() {
+        let it = if path.as_ref().as_os_str().is_empty() {
             self.fs.read_dir(".")?.map(|res| {
                 res.map(|x| {
                     x.path()
@@ -615,7 +614,14 @@ mod tests {
 
         let without_file = TaggedFilesystem::new(clone_fake_fs(&filesystem.fs));
         without_file.fs.remove_file(&file).unwrap();
-        for path in file.as_path().ancestors().skip(1) {
+        for path in file
+            .as_path()
+            .ancestors()
+            .skip(1)
+            // `filesystem` allows removing `/`,
+            // which results in unexpected behavior.
+            .take_while(|path| !path.as_os_str().is_empty())
+        {
             let _ = without_file.fs.remove_dir(path); // Only remove if empty.
         }
 
