@@ -77,6 +77,16 @@ enum Commands {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// Print paths of files with given tags
+    Find {
+        /// Find files including *all* these tags
+        #[clap(value_name = "TAG", value_parser = tag_parser)]
+        include: Vec<Tag>,
+
+        /// Ignore files including *any* of these tags
+        #[clap(long, short, value_name = "TAG", value_parser = tag_parser)]
+        exclude: Vec<Tag>,
+    },
 }
 
 fn tag_parser(s: &str) -> Result<Tag, String> {
@@ -105,6 +115,10 @@ fn main() -> anyhow::Result<()> {
             filesystem.organize()?;
             Vec::new()
         }
+        Some(Commands::Find { include, exclude }) => filesystem
+            .find(&include, &exclude)?
+            .map(|file| file.into_path())
+            .collect(),
         None => Vec::new(),
     } {
         // `display()` should not affect results

@@ -187,6 +187,10 @@ impl TaggedFile {
         self.path.as_ref()
     }
 
+    pub fn into_path(self) -> PathBuf {
+        self.path.into()
+    }
+
     pub(crate) fn add_inline_tag<T>(self, tag: T) -> Result<MoveOp, HasTagError>
     where
         T: AsRef<TagRef>,

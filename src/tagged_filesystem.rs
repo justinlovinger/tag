@@ -204,6 +204,24 @@ where
         Ok(())
     }
 
+    pub fn find<'a>(
+        &self,
+        include: &'a [Tag],
+        exclude: &'a [Tag],
+    ) -> std::io::Result<impl Iterator<Item = TaggedFile> + 'a> {
+        Ok(self
+            .find_tagged_files("".into())?
+            .into_iter()
+            .filter(|file| {
+                include
+                    .iter()
+                    .all(|tag| file.tags().contains(&tag.as_ref()))
+                    && !exclude
+                        .iter()
+                        .any(|tag| file.tags().contains(&tag.as_ref()))
+            }))
+    }
+
     fn move_and_organize(
         &self,
         move_ops: Vec<MoveOp>,
@@ -669,7 +687,8 @@ mod tests {
 
     #[test]
     fn organize_moves_files_into_optimal_tag_directories() {
-        let filesystem = fake_filesystem_with(["a/b/c/_foo", "a-b-_bar", "d/e-_baz", "🙂/🙁/_fez", "_fiz"]);
+        let filesystem =
+            fake_filesystem_with(["a/b/c/_foo", "a-b-_bar", "d/e-_baz", "🙂/🙁/_fez", "_fiz"]);
         filesystem.organize().unwrap();
         assert_eq!(
             list_files(&filesystem.fs),
@@ -878,6 +897,51 @@ mod tests {
             .del(tag, [TaggedFile::from_path(new_file).unwrap()])
             .unwrap();
         prop_assert_eq!(list_files(&filesystem.fs), files)
+    }
+
+    #[test]
+    fn find_returns_files_with_tag() {
+        let filesystem = fake_filesystem_with(["foo-_1", "bar-_2"]);
+        assert_eq!(
+            filesystem
+                .find(&[Tag::new("foo".into()).unwrap()], &[])
+                .unwrap()
+                .collect_vec(),
+            [TaggedFile::new("foo-_1".into()).unwrap()]
+        );
+    }
+
+    #[test]
+    fn find_returns_files_with_all_tags() {
+        let filesystem = fake_filesystem_with(["foo/bar-_1", "foo/_2"]);
+        assert_eq!(
+            filesystem
+                .find(
+                    &[
+                        Tag::new("foo".into()).unwrap(),
+                        Tag::new("bar".into()).unwrap()
+                    ],
+                    &[],
+                )
+                .unwrap()
+                .collect_vec(),
+            [TaggedFile::new("foo/bar-_1".into()).unwrap()]
+        );
+    }
+
+    #[test]
+    fn find_does_not_return_files_with_excluded_tags() {
+        let filesystem = fake_filesystem_with(["foo/bar-_1", "foo/_2"]);
+        assert_eq!(
+            filesystem
+                .find(
+                    &[Tag::new("foo".into()).unwrap(),],
+                    &[Tag::new("bar".into()).unwrap()],
+                )
+                .unwrap()
+                .collect_vec(),
+            [TaggedFile::new("foo/_2".into()).unwrap()]
+        );
     }
 
     fn clone_fake_fs(fs: &FakeFileSystem) -> FakeFileSystem {
