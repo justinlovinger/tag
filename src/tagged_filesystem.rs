@@ -669,11 +669,7 @@ mod tests {
 
     #[test]
     fn organize_moves_files_into_optimal_tag_directories() {
-        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
-        for path in ["a/b/c/_foo", "a-b-_bar", "d/e-_baz", "🙂/🙁/_fez", "_fiz"] {
-            make_file_and_parent(&filesystem.fs, path);
-        }
-
+        let filesystem = fake_filesystem_with(["a/b/c/_foo", "a-b-_bar", "d/e-_baz", "🙂/🙁/_fez", "_fiz"]);
         filesystem.organize().unwrap();
         assert_eq!(
             list_files(&filesystem.fs),
@@ -683,11 +679,7 @@ mod tests {
 
     #[test]
     fn organize_moves_files_into_optimal_tag_directories_when_all_have_same_tags() {
-        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
-        for path in ["a-b-c-_bar", "a/b/c/_foo"] {
-            make_file_and_parent(&filesystem.fs, path);
-        }
-
+        let filesystem = fake_filesystem_with(["a-b-c-_bar", "a/b/c/_foo"]);
         filesystem.organize().unwrap();
         assert_eq!(
             list_files(&filesystem.fs),
@@ -697,11 +689,7 @@ mod tests {
 
     #[test]
     fn organize_breaks_ties_in_favor_of_increasing_length() {
-        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
-        for path in ["a/bb/_1", "bb/_2", "a/_3", "dd-ccc-_4"] {
-            make_file_and_parent(&filesystem.fs, path);
-        }
-
+        let filesystem = fake_filesystem_with(["a/bb/_1", "bb/_2", "a/_3", "dd-ccc-_4"]);
         filesystem.organize().unwrap();
         assert_eq!(
             list_files(&filesystem.fs),
@@ -711,11 +699,7 @@ mod tests {
 
     #[test]
     fn organize_ignores_untagged_files() {
-        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
-        for path in ["a/_foo", "a/not-tagged"] {
-            make_file_and_parent(&filesystem.fs, path);
-        }
-
+        let filesystem = fake_filesystem_with(["a/_foo", "a/not-tagged"]);
         filesystem.organize().unwrap();
         assert_eq!(
             list_files(&filesystem.fs),
@@ -805,10 +789,7 @@ mod tests {
     fn organize_returns_err_if_files_have_same_tags_and_name() {
         // These files cannot be organized
         // without deleting one or the other.
-        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
-        for path in ["foo/_bar", "foo-_bar"] {
-            make_file_and_parent(&filesystem.fs, path);
-        }
+        let filesystem = fake_filesystem_with(["foo/_bar", "foo-_bar"]);
         assert!(filesystem.organize().is_err());
     }
 
