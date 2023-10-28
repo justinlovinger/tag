@@ -158,7 +158,7 @@ where
             }
         }
 
-        let mut files = self.find_tagged_files("".into())?;
+        let mut files = self.find_tagged_files().collect_vec();
         let (file_is_fake, from) = match files.iter().find(|other| {
             other.tags_len() == tag_set.len()
                 && other.tags().all(|tag| tag_set.contains(tag))
@@ -199,34 +199,31 @@ where
     }
 
     pub fn organize(&self) -> std::io::Result<()> {
-        let files = self.find_tagged_files("".into())?;
+        let files = self.find_tagged_files().collect_vec();
         self.apply_all(from_move_ops(organize(&files)))?;
         Ok(())
     }
 
     pub fn find<'a>(
-        &self,
+        &'a self,
         include: &'a [Tag],
         exclude: &'a [Tag],
     ) -> std::io::Result<impl Iterator<Item = TaggedFile> + 'a> {
-        Ok(self
-            .find_tagged_files("".into())?
-            .into_iter()
-            .filter(|file| {
-                include
+        Ok(self.find_tagged_files().filter(|file| {
+            include
+                .iter()
+                .all(|tag| file.tags().contains(&tag.as_ref()))
+                && !exclude
                     .iter()
-                    .all(|tag| file.tags().contains(&tag.as_ref()))
-                    && !exclude
-                        .iter()
-                        .any(|tag| file.tags().contains(&tag.as_ref()))
-            }))
+                    .any(|tag| file.tags().contains(&tag.as_ref()))
+        }))
     }
 
     fn move_and_organize(
         &self,
         move_ops: Vec<MoveOp>,
     ) -> Result<Vec<PathBuf>, MoveAndOrganizeError> {
-        let mut files = self.find_tagged_files("".into())?;
+        let mut files = self.find_tagged_files().collect_vec();
         for op in move_ops.iter() {
             match files.iter_mut().find(|file| file.as_path() == op.from) {
                 Some(f) => {
@@ -262,24 +259,12 @@ where
         Ok(new_paths)
     }
 
-    fn find_tagged_files(&self, root: PathBuf) -> std::io::Result<Vec<TaggedFile>> {
-        let mut dirs = vec![root];
-        let mut files = Vec::new();
-        while let Some(dir) = dirs.pop() {
-            for path in self.sane_read_dir(dir)? {
-                let path = path?;
-                match TaggedFile::from_path(path) {
-                    Ok(file) => files.push(file),
-                    Err(e) => {
-                        let path = e.into_path();
-                        if self.fs.is_dir(&path) {
-                            dirs.push(path);
-                        }
-                    }
-                }
-            }
+    fn find_tagged_files(&self) -> impl Iterator<Item = TaggedFile> + '_ {
+        TaggedFilesIterator {
+            filesystem: self,
+            dirs: vec!["".into()],
+            it: Box::new([].into_iter()),
         }
-        Ok(files)
     }
 
     fn apply_all<O>(&self, ops: impl Iterator<Item = O>) -> std::io::Result<()>
@@ -380,6 +365,41 @@ where
             self.fs.read_dir(path)?.map(|res| res.map(|x| x.path()))
         };
         Ok(it)
+    }
+}
+
+struct TaggedFilesIterator<'a, F> {
+    filesystem: &'a TaggedFilesystem<F>,
+    dirs: Vec<PathBuf>,
+    it: Box<dyn Iterator<Item = std::io::Result<PathBuf>>>,
+}
+
+impl<'a, F> Iterator for TaggedFilesIterator<'a, F>
+where
+    F: FileSystem + 'static,
+{
+    type Item = TaggedFile;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.it.next() {
+            Some(path) => match TaggedFile::from_path(path.unwrap()) {
+                Ok(file) => Some(file),
+                Err(e) => {
+                    let path = e.into_path();
+                    if self.filesystem.fs.is_dir(&path) {
+                        self.dirs.push(path);
+                    }
+                    self.next()
+                }
+            },
+            None => match self.dirs.pop() {
+                Some(dir) => {
+                    self.it = Box::new(self.filesystem.sane_read_dir(dir).unwrap());
+                    self.next()
+                }
+                None => None,
+            },
+        }
     }
 }
 

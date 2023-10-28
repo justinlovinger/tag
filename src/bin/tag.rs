@@ -106,25 +106,28 @@ fn main() -> anyhow::Result<()> {
         .dry_run(args.dry_run)
         .verbose(args.verbose)
         .build();
-    for path in match args.command {
-        Some(Commands::Add { tag, files }) => filesystem.add(tag, files)?,
-        Some(Commands::Del { tag, files }) => filesystem.del(tag, files)?,
-        Some(Commands::Path { tags, name }) => vec![filesystem.path(tags, name)?],
+    match args.command {
+        Some(Commands::Add { tag, files }) => print_paths(filesystem.add(tag, files)?),
+        Some(Commands::Del { tag, files }) => print_paths(filesystem.del(tag, files)?),
+        Some(Commands::Path { tags, name }) => print_paths([filesystem.path(tags, name)?]),
         Some(Commands::Organize { path }) => {
             std::env::set_current_dir(path)?;
             filesystem.organize()?;
-            Vec::new()
         }
-        Some(Commands::Find { include, exclude }) => filesystem
-            .find(&include, &exclude)?
-            .map(|file| file.into_path())
-            .collect(),
-        None => Vec::new(),
-    } {
+        Some(Commands::Find { include, exclude }) => print_paths(
+            filesystem
+                .find(&include, &exclude)?
+                .map(|file| file.into_path()),
+        ),
+        None => {}
+    }
+    Ok(())
+}
+
+fn print_paths(paths: impl IntoIterator<Item = PathBuf>) {
+    for path in paths {
         // `display()` should not affect results
         // because invalid unicode should error before here.
         println!("{}", path.display())
     }
-
-    Ok(())
 }
