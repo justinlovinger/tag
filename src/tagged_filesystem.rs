@@ -1,9 +1,8 @@
 use std::{
     collections::{BTreeSet, HashSet},
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 
-use auto_enums::auto_enum;
 use filesystem::{DirEntry, FileSystem};
 use itertools::Itertools;
 
@@ -262,8 +261,8 @@ where
     fn find_tagged_files(&self) -> impl Iterator<Item = TaggedFile> + '_ {
         TaggedFilesIterator {
             filesystem: self,
-            dirs: vec!["".into()],
-            it: Box::new([].into_iter()),
+            dirs: vec![],
+            it: Box::new(self.read_cwd().unwrap()),
         }
     }
 
@@ -332,7 +331,7 @@ where
                 // ```
                 if self.dry_run {
                     Ok(())
-                } else if self.sane_read_dir(&path)?.next().is_none() {
+                } else if self.fs.read_dir(&path)?.next().is_none() {
                     self.fs.remove_dir(path)
                 } else {
                     Ok(())
@@ -343,28 +342,17 @@ where
 
     // The rust standard library has unexpected behavior for `std::io::read_dir("")`,
     // see <https://github.com/rust-lang/rust/issues/114149>.
-    #[auto_enum]
-    fn sane_read_dir<P>(
+    fn read_cwd(
         &self,
-        path: P,
-    ) -> std::io::Result<impl Iterator<Item = std::io::Result<PathBuf>> + 'static>
-    where
-        P: AsRef<Path>,
-    {
-        #[auto_enum(Iterator)]
-        let it = if path.as_ref().as_os_str().is_empty() {
-            self.fs.read_dir(".")?.map(|res| {
-                res.map(|x| {
-                    x.path()
-                        .strip_prefix("./")
-                        .expect("file from `.` should start with `./`")
-                        .to_owned()
-                })
+    ) -> std::io::Result<impl Iterator<Item = std::io::Result<PathBuf>> + 'static> {
+        Ok(self.fs.read_dir(".")?.map(|res| {
+            res.map(|x| {
+                x.path()
+                    .strip_prefix("./")
+                    .expect("file from `.` should start with `./`")
+                    .to_owned()
             })
-        } else {
-            self.fs.read_dir(path)?.map(|res| res.map(|x| x.path()))
-        };
-        Ok(it)
+        }))
     }
 }
 
@@ -394,7 +382,13 @@ where
             },
             None => match self.dirs.pop() {
                 Some(dir) => {
-                    self.it = Box::new(self.filesystem.sane_read_dir(dir).unwrap());
+                    self.it = Box::new(
+                        self.filesystem
+                            .fs
+                            .read_dir(dir)
+                            .unwrap()
+                            .map(|res| res.map(|x| x.path())),
+                    );
                     self.next()
                 }
                 None => None,
