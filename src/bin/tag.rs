@@ -15,6 +15,15 @@ struct Args {
     #[arg(short, long)]
     verbose: bool,
 
+    /// Use given path as working directory
+    ///
+    /// All other paths will be resolved
+    /// relative to this path.
+    /// This is equivalent to calling `cd PATH`
+    /// before running this program.
+    #[arg(long, value_name = "PATH")]
+    working_directory: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -63,7 +72,7 @@ enum Commands {
         #[clap(required = true, value_name = "NAME")]
         name: String,
     },
-    /// Organize all tagged files under the given directory
+    /// Organize all tagged files under the working directory
     ///
     /// Tags are split into directories,
     /// most frequent first.
@@ -72,11 +81,7 @@ enum Commands {
     /// Unique tags are inlined.
     ///
     /// Untagged files are not changed.
-    Organize {
-        /// Directory to organize
-        #[arg(default_value = ".")]
-        path: PathBuf,
-    },
+    Organize,
     /// Print paths of files with given tags
     Find {
         /// Find files including *all* these tags
@@ -102,6 +107,10 @@ fn tagged_file_parser(s: &str) -> Result<TaggedFile, String> {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
+    if let Some(path) = args.working_directory {
+        std::env::set_current_dir(path)?;
+    }
+
     let filesystem = TaggedFilesystemBuilder::new(OsFileSystem::new())
         .dry_run(args.dry_run)
         .verbose(args.verbose)
@@ -110,10 +119,7 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Add { tag, files }) => print_paths(filesystem.add(tag, files)?),
         Some(Commands::Del { tag, files }) => print_paths(filesystem.del(tag, files)?),
         Some(Commands::Path { tags, name }) => print_paths([filesystem.path(tags, name)?]),
-        Some(Commands::Organize { path }) => {
-            std::env::set_current_dir(path)?;
-            filesystem.organize()?;
-        }
+        Some(Commands::Organize) => filesystem.organize()?,
         Some(Commands::Find { include, exclude }) => print_paths(
             filesystem
                 .find(&include, &exclude)?
