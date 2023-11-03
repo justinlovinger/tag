@@ -120,11 +120,9 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Del { tag, files }) => print_paths(filesystem.del(tag, files)?),
         Some(Commands::Path { tags, name }) => print_paths([filesystem.path(tags, name)?]),
         Some(Commands::Organize) => filesystem.organize()?,
-        Some(Commands::Find { include, exclude }) => print_paths(
-            filesystem
-                .find(&include, &exclude)?
-                .map(|file| file.into_path()),
-        ),
+        Some(Commands::Find { include, exclude }) => filesystem
+            .find(&include, &exclude)?
+            .for_each(|file| println!("{file}")),
         None => {}
     }
     Ok(())
