@@ -121,7 +121,7 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Path { tags, name }) => print_paths([filesystem.path(tags, name)?]),
         Some(Commands::Organize) => filesystem.organize()?,
         Some(Commands::Find { include, exclude }) => filesystem
-            .find(&include, &exclude)?
+            .find(include, exclude)?
             .for_each(|file| println!("{file}")),
         None => {}
     }

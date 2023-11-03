@@ -106,7 +106,7 @@ impl<F> TaggedFilesystemBuilder<F> {
 
 impl<F> TaggedFilesystem<F>
 where
-    F: FileSystem + 'static,
+    F: FileSystem + Clone + Send + Sync + 'static,
 {
     pub fn new(fs: F) -> Self {
         Self {
@@ -157,7 +157,7 @@ where
             }
         }
 
-        let mut files = self.find_tagged_files().collect_vec();
+        let mut files = self.tagged_files().collect_vec();
         let (file_is_fake, from) = match files.iter().find(|other| {
             other.tags_len() == tag_set.len()
                 && other.tags().all(|tag| tag_set.contains(tag))
@@ -198,31 +198,36 @@ where
     }
 
     pub fn organize(&self) -> std::io::Result<()> {
-        let files = self.find_tagged_files().collect_vec();
+        let files = self.tagged_files().collect_vec();
         self.apply_all(from_move_ops(organize(&files)))?;
         Ok(())
     }
 
-    pub fn find<'a>(
-        &'a self,
-        include: &'a [Tag],
-        exclude: &'a [Tag],
-    ) -> std::io::Result<impl Iterator<Item = TaggedFile> + 'a> {
-        Ok(self.find_tagged_files().filter(|file| {
-            include
+    pub fn find(
+        &self,
+        include: Vec<Tag>,
+        exclude: Vec<Tag>,
+    ) -> std::io::Result<impl Iterator<Item = TaggedFile>> {
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        self.for_each_tagged_file(move |file| {
+            if include
                 .iter()
                 .all(|tag| file.tags().contains(&tag.as_ref()))
                 && !exclude
                     .iter()
                     .any(|tag| file.tags().contains(&tag.as_ref()))
-        }))
+            {
+                sender.send(file).unwrap()
+            }
+        });
+        Ok(receiver.into_iter())
     }
 
     fn move_and_organize(
         &self,
         move_ops: Vec<MoveOp>,
     ) -> Result<Vec<PathBuf>, MoveAndOrganizeError> {
-        let mut files = self.find_tagged_files().collect_vec();
+        let mut files = self.tagged_files().collect_vec();
         for op in move_ops.iter() {
             match files.iter_mut().find(|file| file.as_path() == op.from) {
                 Some(f) => {
@@ -258,11 +263,49 @@ where
         Ok(new_paths)
     }
 
-    fn find_tagged_files(&self) -> impl Iterator<Item = TaggedFile> + '_ {
-        TaggedFilesIterator {
-            filesystem: self,
-            dirs: vec![],
-            it: Box::new(self.read_cwd().unwrap()),
+    fn tagged_files(&self) -> impl Iterator<Item = TaggedFile> {
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        self.for_each_tagged_file(move |file| sender.send(file).unwrap());
+        receiver.into_iter()
+    }
+
+    fn for_each_tagged_file<C>(&self, callback: C)
+    where
+        C: Fn(TaggedFile) + Send + Sync + 'static,
+    {
+        let fs = self.fs.clone();
+        rayon::spawn(move || {
+            rayon::scope(|s| Self::for_each_tagged_file_(&fs, s, &callback, read_cwd(&fs).unwrap()))
+        });
+    }
+
+    fn for_each_tagged_file_<'a, 'scope, C>(
+        fs: &'a F,
+        scope: &rayon::Scope<'scope>,
+        callback: &'scope C,
+        paths: impl Iterator<Item = std::io::Result<PathBuf>>,
+    ) where
+        'a: 'scope,
+        C: Fn(TaggedFile) + Send + Sync,
+    {
+        for path in paths {
+            scope.spawn(|scope| {
+                let path = path.unwrap();
+                match TaggedFile::from_path(path) {
+                    Ok(file) => callback(file),
+                    Err(e) => {
+                        let path = e.into_path();
+                        if fs.is_dir(&path) {
+                            Self::for_each_tagged_file_(
+                                fs,
+                                scope,
+                                callback,
+                                read_dir(fs, path).unwrap(),
+                            )
+                        }
+                    }
+                }
+            })
         }
     }
 
@@ -321,7 +364,7 @@ where
 
                 // Note,
                 // we can do the following with nightly Rust,
-                // which may be more efficient than `self.sane_read_dir(&path)?.next().is_none()`:
+                // which may be more efficient than `self.fs.read_dir(&path)?.next().is_none()`:
                 // ```
                 // if let Err(e) = self.fs.remove_dir(path) {
                 //     if e.kind() != std::io::ErrorKind::DirectoryNotEmpty {
@@ -337,62 +380,6 @@ where
                     Ok(())
                 }
             }
-        }
-    }
-
-    // The rust standard library has unexpected behavior for `std::io::read_dir("")`,
-    // see <https://github.com/rust-lang/rust/issues/114149>.
-    fn read_cwd(
-        &self,
-    ) -> std::io::Result<impl Iterator<Item = std::io::Result<PathBuf>> + 'static> {
-        Ok(self.fs.read_dir(".")?.map(|res| {
-            res.map(|x| {
-                x.path()
-                    .strip_prefix("./")
-                    .expect("file from `.` should start with `./`")
-                    .to_owned()
-            })
-        }))
-    }
-}
-
-struct TaggedFilesIterator<'a, F> {
-    filesystem: &'a TaggedFilesystem<F>,
-    dirs: Vec<PathBuf>,
-    it: Box<dyn Iterator<Item = std::io::Result<PathBuf>>>,
-}
-
-impl<'a, F> Iterator for TaggedFilesIterator<'a, F>
-where
-    F: FileSystem + 'static,
-{
-    type Item = TaggedFile;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.it.next() {
-            Some(path) => match TaggedFile::from_path(path.unwrap()) {
-                Ok(file) => Some(file),
-                Err(e) => {
-                    let path = e.into_path();
-                    if self.filesystem.fs.is_dir(&path) {
-                        self.dirs.push(path);
-                    }
-                    self.next()
-                }
-            },
-            None => match self.dirs.pop() {
-                Some(dir) => {
-                    self.it = Box::new(
-                        self.filesystem
-                            .fs
-                            .read_dir(dir)
-                            .unwrap()
-                            .map(|res| res.map(|x| x.path())),
-                    );
-                    self.next()
-                }
-                None => None,
-            },
         }
     }
 }
@@ -444,6 +431,32 @@ fn from_move_ops(ops: Vec<MoveOp>) -> impl Iterator<Item = Op> {
         .chain(ops.into_iter().map_into())
         // `rev()` to check child directories before parents.
         .chain(del_dirs.into_iter().rev().map(Op::DeleteDirectoryIfEmpty))
+}
+
+// The rust standard library has unexpected behavior for `std::io::read_dir("")`,
+// see <https://github.com/rust-lang/rust/issues/114149>.
+fn read_cwd<F>(fs: &F) -> std::io::Result<impl Iterator<Item = std::io::Result<PathBuf>>>
+where
+    F: FileSystem,
+{
+    Ok(fs.read_dir(".")?.map(|res| {
+        res.map(|x| {
+            x.path()
+                .strip_prefix("./")
+                .expect("file from `.` should start with `./`")
+                .to_owned()
+        })
+    }))
+}
+
+fn read_dir<F>(
+    fs: &F,
+    dir: PathBuf,
+) -> std::io::Result<impl Iterator<Item = std::io::Result<PathBuf>>>
+where
+    F: FileSystem,
+{
+    Ok(fs.read_dir(dir)?.map(|res| res.map(|x| x.path())))
 }
 
 #[cfg(test)]
@@ -918,7 +931,7 @@ mod tests {
         let filesystem = fake_filesystem_with(["foo-_1", "bar-_2"]);
         assert_eq!(
             filesystem
-                .find(&[Tag::new("foo".into()).unwrap()], &[])
+                .find(vec![Tag::new("foo".into()).unwrap()], vec![])
                 .unwrap()
                 .collect_vec(),
             [TaggedFile::new("foo-_1".into()).unwrap()]
@@ -931,11 +944,11 @@ mod tests {
         assert_eq!(
             filesystem
                 .find(
-                    &[
+                    vec![
                         Tag::new("foo".into()).unwrap(),
                         Tag::new("bar".into()).unwrap()
                     ],
-                    &[],
+                    vec![],
                 )
                 .unwrap()
                 .collect_vec(),
@@ -949,8 +962,8 @@ mod tests {
         assert_eq!(
             filesystem
                 .find(
-                    &[Tag::new("foo".into()).unwrap(),],
-                    &[Tag::new("bar".into()).unwrap()],
+                    vec![Tag::new("foo".into()).unwrap(),],
+                    vec![Tag::new("bar".into()).unwrap()],
                 )
                 .unwrap()
                 .collect_vec(),
