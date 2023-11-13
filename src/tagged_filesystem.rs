@@ -583,6 +583,43 @@ mod tests {
         );
     }
 
+    #[test]
+    fn mod_adds_multiple_tags() {
+        let file = TaggedFile::new("foo-_baz".to_owned()).unwrap();
+        let filesystem = fake_filesystem_with([&file]);
+        filesystem
+            .modify(
+                vec![
+                    Tag::new("bar".to_owned()).unwrap(),
+                    Tag::new("baz".to_owned()).unwrap(),
+                ],
+                vec![Tag::new("foo".to_owned()).unwrap()],
+                [file].into_iter().collect(),
+            )
+            .unwrap();
+        assert_eq!(
+            list_files(&filesystem.fs),
+            ["bar-baz-_baz"].map(PathBuf::from)
+        );
+    }
+
+    #[test]
+    fn mod_deletes_multiple_tags() {
+        let file = TaggedFile::new("foo-baz-_baz".to_owned()).unwrap();
+        let filesystem = fake_filesystem_with([&file]);
+        filesystem
+            .modify(
+                vec![Tag::new("bar".to_owned()).unwrap()],
+                vec![
+                    Tag::new("foo".to_owned()).unwrap(),
+                    Tag::new("baz".to_owned()).unwrap(),
+                ],
+                [file].into_iter().collect(),
+            )
+            .unwrap();
+        assert_eq!(list_files(&filesystem.fs), ["bar-_baz"].map(PathBuf::from));
+    }
+
     #[proptest(cases = 20)]
     fn mod_does_not_change_file_if_no_tags_given(
         #[strategy(TaggedFilesystem::<FakeFileSystem>::arbitrary_with(TaggedFilesParams {
