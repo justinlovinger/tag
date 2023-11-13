@@ -56,6 +56,23 @@ enum Commands {
         #[clap(required = true, value_name = "FILE", value_parser = tagged_file_parser)]
         files: Vec<TaggedFile>,
     },
+    /// Add and delete tags from files and print new paths
+    ///
+    /// Relevant tagged files under the working directory are organized
+    /// in the process.
+    Mod {
+        /// Tags to add
+        #[clap(short, long, value_name = "TAG", value_parser = tag_parser)]
+        add: Vec<Tag>,
+
+        /// Tags to delete
+        #[clap(short, long, value_name = "TAG", value_parser = tag_parser)]
+        del: Vec<Tag>,
+
+        /// Files to modify
+        #[clap(required = true, value_name = "FILE", value_parser = tagged_file_parser)]
+        files: Vec<TaggedFile>,
+    },
     /// Print path of file with given tags and name
     ///
     /// Relevant tagged files under the working directory are organized
@@ -125,6 +142,9 @@ fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Del { tag, files }) => {
             print_paths(filesystem.del(tag, files.into_iter().collect())?)
+        }
+        Some(Commands::Mod { add, del, files }) => {
+            print_paths(filesystem.modify(add, del, files.into_iter().collect())?)
         }
         Some(Commands::Path { tags, name }) => print_paths([filesystem.path(tags, name)?]),
         Some(Commands::Organize) => filesystem.organize()?,

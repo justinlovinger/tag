@@ -10,7 +10,7 @@ mod testing;
 pub use crate::{
     tag::{Tag, TagRef},
     tagged_file::TaggedFile,
-    tagged_filesystem::{AddError, DelError, TaggedFilesystem, TaggedFilesystemBuilder},
+    tagged_filesystem::{TaggedFilesystem, TaggedFilesystemBuilder},
 };
 
 pub const INLINE_SEPARATOR: char = '-';

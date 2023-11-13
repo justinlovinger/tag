@@ -41,14 +41,8 @@ impl From<MoveOp> for Op {
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
-pub enum AddError {
+pub enum ModError {
     HasTag(#[from] HasTagError),
-    MoveAndOrganize(#[from] MoveAndOrganizeError),
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("{0}")]
-pub enum DelError {
     LacksTag(#[from] LacksTagError),
     MoveAndOrganize(#[from] MoveAndOrganizeError),
 }
@@ -116,35 +110,24 @@ where
         }
     }
 
-    pub fn add(&self, tag: Tag, files: FxHashSet<TaggedFile>) -> Result<Vec<PathBuf>, AddError> {
-        let tags = files
-            .iter()
-            .flat_map(|file| file.tags().map(|tag| tag.to_owned()))
-            .chain([tag.clone()])
-            .collect::<FxHashSet<_>>();
-
-        let files = Arc::new(files);
-        let other_files = self
-            .filtered_tagged_files({
-                let files = Arc::clone(&files);
-                move |file| !files.contains(file)
-            })
-            .collect_vec();
-        let files = Arc::try_unwrap(files).unwrap_or_else(|arc| (*arc).clone());
-
-        Ok(self.move_and_organize(
-            files
-                .into_iter()
-                .map(|file| file.add_inline_tag(&tag))
-                .collect::<Result<Vec<_>, _>>()?,
-            relevant_files(tags, other_files),
-        )?)
+    pub fn add(&self, tag: Tag, files: FxHashSet<TaggedFile>) -> Result<Vec<PathBuf>, ModError> {
+        self.modify(vec![tag], vec![], files)
     }
 
-    pub fn del(&self, tag: Tag, files: FxHashSet<TaggedFile>) -> Result<Vec<PathBuf>, DelError> {
+    pub fn del(&self, tag: Tag, files: FxHashSet<TaggedFile>) -> Result<Vec<PathBuf>, ModError> {
+        self.modify(vec![], vec![tag], files)
+    }
+
+    pub fn modify(
+        &self,
+        add: Vec<Tag>,
+        del: Vec<Tag>,
+        files: FxHashSet<TaggedFile>,
+    ) -> Result<Vec<PathBuf>, ModError> {
         let tags = files
             .iter()
             .flat_map(|file| file.tags().map(|tag| tag.to_owned()))
+            .chain(add.iter().cloned())
             .collect::<FxHashSet<_>>();
 
         let files = Arc::new(files);
@@ -159,8 +142,22 @@ where
         Ok(self.move_and_organize(
             files
                 .into_iter()
-                .map(|file| file.del_tag(&tag))
-                .collect::<Result<Vec<_>, _>>()?,
+                .map(|mut file| {
+                    let from = file.as_path().to_owned();
+                    for tag in &add {
+                        file = TaggedFile::from_path(file.add_inline_tag(tag)?.to)
+                            .expect("file should be valid after adding inline tag");
+                    }
+                    for tag in &del {
+                        file = TaggedFile::from_path(file.del_tag(tag)?.to)
+                            .expect("file should be valid after deleting tag");
+                    }
+                    Ok(MoveOp {
+                        from,
+                        to: file.into_path(),
+                    })
+                })
+                .collect::<Result<Vec<_>, ModError>>()?,
             relevant_files(tags, other_files),
         )?)
     }
@@ -700,6 +697,128 @@ mod tests {
             .del(
                 Tag::new("foo".to_owned()).unwrap(),
                 [TaggedFile::new("foo-_bar".to_owned()).unwrap()]
+                    .into_iter()
+                    .collect()
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn mod_renames_file() {
+        let file = TaggedFile::new("foo-_baz".to_owned()).unwrap();
+        let filesystem = fake_filesystem_with([&file]);
+        filesystem
+            .modify(
+                vec![Tag::new("bar".to_owned()).unwrap()],
+                vec![Tag::new("foo".to_owned()).unwrap()],
+                [file].into_iter().collect(),
+            )
+            .unwrap();
+        assert_eq!(list_files(&filesystem.fs), ["bar-_baz"].map(PathBuf::from));
+    }
+
+    #[test]
+    fn mod_renames_all_files() {
+        let files = ["foo/_bar", "foo/_foo"];
+        let filesystem = fake_filesystem_with(files);
+        filesystem
+            .modify(
+                vec![Tag::new("bar".to_owned()).unwrap()],
+                vec![Tag::new("foo".to_owned()).unwrap()],
+                files
+                    .into_iter()
+                    .map(|file| TaggedFile::new(file.to_owned()).unwrap())
+                    .collect(),
+            )
+            .unwrap();
+        assert_eq!(
+            list_files(&filesystem.fs),
+            ["bar/_bar", "bar/_foo"].map(PathBuf::from)
+        );
+    }
+
+    #[proptest(cases = 20)]
+    fn mod_organizes_files(
+        #[strategy(TaggedFileSystemWithMetadata::arbitrary_with(TaggedFilesParams {
+            min_tags: 1, min_files: 1, ..TaggedFilesParams::default()
+        }))]
+        args: TaggedFileSystemWithMetadata,
+        file_index: usize,
+        tag: Tag,
+        tag_index: usize,
+    ) {
+        let filesystem = args.filesystem;
+        let tags = args.tags;
+
+        filesystem.organize().unwrap();
+
+        let files = list_files(&filesystem.fs);
+        let file = TaggedFile::from_path(files[file_index % files.len()].clone()).unwrap();
+        let del_tag = file
+            .tags()
+            .nth(tag_index % file.tags_len())
+            .unwrap()
+            .to_owned();
+        let add_tag = tags
+            .into_iter()
+            .find(|tag| !file.tags().contains(&tag.as_ref()))
+            .unwrap_or({
+                prop_assume!(!file.tags().contains(&tag.as_ref()));
+                tag
+            });
+
+        let expected = TaggedFilesystem::new(clone_fake_fs(&filesystem.fs));
+        let op = file.clone().add_inline_tag(&add_tag).unwrap();
+        let to = TaggedFile::from_path(op.to)
+            .unwrap()
+            .del_tag(&del_tag)
+            .unwrap()
+            .to;
+        prop_assume!(expected
+            .apply_all(from_move_ops(vec![MoveOp { from: op.from, to }]))
+            .is_ok());
+        prop_assume!(expected.organize().is_ok());
+
+        filesystem
+            .modify(vec![add_tag], vec![del_tag], [file].into_iter().collect())
+            .unwrap();
+        prop_assert_eq!(list_files(&filesystem.fs), list_files(&expected.fs))
+    }
+
+    #[test]
+    fn mod_returns_error_if_file_already_has_tag() {
+        let file = TaggedFile::new("foo-_bar".to_owned()).unwrap();
+        let filesystem = fake_filesystem_with([&file]);
+        assert!(filesystem
+            .modify(
+                vec![Tag::new("foo".to_owned()).unwrap()],
+                vec![],
+                [file].into_iter().collect()
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn mod_returns_error_if_file_lacks_tag() {
+        let file = TaggedFile::new("_bar".to_owned()).unwrap();
+        let filesystem = fake_filesystem_with([&file]);
+        assert!(filesystem
+            .modify(
+                vec![],
+                vec![Tag::new("foo".to_owned()).unwrap()],
+                [file].into_iter().collect()
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn mod_returns_error_if_file_does_not_exist() {
+        let filesystem = TaggedFilesystem::new(FakeFileSystem::new());
+        assert!(filesystem
+            .modify(
+                vec![],
+                vec![],
+                [TaggedFile::new("_foo".to_owned()).unwrap()]
                     .into_iter()
                     .collect()
             )
