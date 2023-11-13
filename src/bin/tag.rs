@@ -32,7 +32,7 @@ struct Args {
 enum Commands {
     /// Add tags to files and print new paths
     ///
-    /// All tagged files under the working directory are organized
+    /// Relevant tagged files under the working directory are organized
     /// in the process.
     Add {
         /// Tag to add
@@ -45,7 +45,7 @@ enum Commands {
     },
     /// Delete tags from files and print new paths
     ///
-    /// All tagged files under the working directory are organized
+    /// Relevant tagged files under the working directory are organized
     /// in the process.
     Del {
         /// Tag to delete
@@ -58,7 +58,7 @@ enum Commands {
     },
     /// Print path of file with given tags and name
     ///
-    /// All tagged files under the working directory are organized
+    /// Relevant tagged files under the working directory are organized
     /// in the process.
     /// If no file exists with the given tags and name,
     /// files are organized
@@ -116,8 +116,16 @@ fn main() -> anyhow::Result<()> {
         .verbose(args.verbose)
         .build();
     match args.command {
-        Some(Commands::Add { tag, files }) => print_paths(filesystem.add(tag, files)?),
-        Some(Commands::Del { tag, files }) => print_paths(filesystem.del(tag, files)?),
+        // Ideally,
+        // Clap would collect `files` as the correct collection,
+        // so we would not need to allocate twice,
+        // see <https://github.com/clap-rs/clap/issues/3114>.
+        Some(Commands::Add { tag, files }) => {
+            print_paths(filesystem.add(tag, files.into_iter().collect())?)
+        }
+        Some(Commands::Del { tag, files }) => {
+            print_paths(filesystem.del(tag, files.into_iter().collect())?)
+        }
         Some(Commands::Path { tags, name }) => print_paths([filesystem.path(tags, name)?]),
         Some(Commands::Organize) => filesystem.organize()?,
         Some(Commands::Find { include, exclude }) => filesystem

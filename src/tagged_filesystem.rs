@@ -1,14 +1,13 @@
-use std::{
-    collections::{BTreeSet, HashSet},
-    path::PathBuf,
-};
+use std::{collections::BTreeSet, path::PathBuf, sync::Arc};
 
 use filesystem::{DirEntry, FileSystem};
 use itertools::Itertools;
+use rayon::prelude::*;
+use rustc_hash::FxHashSet;
 
 use crate::{
     organize::organize,
-    tagged_file::{HasTagError, LacksTagError},
+    tagged_file::{HasTagError, LacksTagError, NewError},
     types::MoveOp,
     Tag, TaggedFile, INLINE_SEPARATOR,
 };
@@ -69,6 +68,7 @@ pub struct FileNotFoundError(PathBuf);
 #[error("{0}")]
 pub enum PathError {
     NonUniqueTag(#[from] NonUniqueTagError),
+    New(#[from] NewError),
     Filesystem(#[from] std::io::Error),
 }
 
@@ -116,29 +116,52 @@ where
         }
     }
 
-    pub fn add(
-        &self,
-        tag: Tag,
-        files: impl IntoIterator<Item = TaggedFile>,
-    ) -> Result<Vec<PathBuf>, AddError> {
+    pub fn add(&self, tag: Tag, files: FxHashSet<TaggedFile>) -> Result<Vec<PathBuf>, AddError> {
+        let tags = files
+            .iter()
+            .flat_map(|file| file.tags().map(|tag| tag.to_owned()))
+            .chain([tag.clone()])
+            .collect::<FxHashSet<_>>();
+
+        let files = Arc::new(files);
+        let other_files = self
+            .filtered_tagged_files({
+                let files = Arc::clone(&files);
+                move |file| !files.contains(file)
+            })
+            .collect_vec();
+        let files = Arc::try_unwrap(files).unwrap_or_else(|arc| (*arc).clone());
+
         Ok(self.move_and_organize(
             files
                 .into_iter()
                 .map(|file| file.add_inline_tag(&tag))
                 .collect::<Result<Vec<_>, _>>()?,
+            relevant_files(tags, other_files),
         )?)
     }
 
-    pub fn del(
-        &self,
-        tag: Tag,
-        files: impl IntoIterator<Item = TaggedFile>,
-    ) -> Result<Vec<PathBuf>, DelError> {
+    pub fn del(&self, tag: Tag, files: FxHashSet<TaggedFile>) -> Result<Vec<PathBuf>, DelError> {
+        let tags = files
+            .iter()
+            .flat_map(|file| file.tags().map(|tag| tag.to_owned()))
+            .collect::<FxHashSet<_>>();
+
+        let files = Arc::new(files);
+        let other_files = self
+            .filtered_tagged_files({
+                let files = Arc::clone(&files);
+                move |file| !files.contains(file)
+            })
+            .collect_vec();
+        let files = Arc::try_unwrap(files).unwrap_or_else(|arc| (*arc).clone());
+
         Ok(self.move_and_organize(
             files
                 .into_iter()
                 .map(|file| file.del_tag(&tag))
                 .collect::<Result<Vec<_>, _>>()?,
+            relevant_files(tags, other_files),
         )?)
     }
 
@@ -148,17 +171,17 @@ where
         name: S,
     ) -> Result<PathBuf, PathError>
     where
-        S: AsRef<str>,
+        S: AsRef<str> + Send + Sync,
     {
-        let mut tag_set = HashSet::new();
+        let mut tag_set = FxHashSet::default();
         for tag in tags.into_iter() {
             if !tag_set.insert(tag) {
                 return Err(NonUniqueTagError.into());
             }
         }
 
-        let mut files = self.tagged_files().collect_vec();
-        let (file_is_fake, from) = match files.iter().find(|other| {
+        let mut files = relevant_files(tag_set.clone(), self.tagged_files().collect());
+        let (file_is_fake, from) = match files.par_iter().find_any(|other| {
             other.tags_len() == tag_set.len()
                 && other.tags().all(|tag| tag_set.contains(tag))
                 && other.name() == name.as_ref()
@@ -167,7 +190,7 @@ where
             None => {
                 let file = TaggedFile::new(format!(
                     "{}_{}",
-                    tag_set.into_iter().format_with("", |tag, f| {
+                    tag_set.iter().format_with("", |tag, f| {
                         f(&tag)?;
                         f(&INLINE_SEPARATOR)?;
                         Ok(())
@@ -182,6 +205,7 @@ where
         };
 
         let mut organized_move_ops = organize(&files);
+
         let enumerated_to = organized_move_ops
             .iter()
             .enumerate()
@@ -198,8 +222,7 @@ where
     }
 
     pub fn organize(&self) -> std::io::Result<()> {
-        let files = self.tagged_files().collect_vec();
-        self.apply_all(from_move_ops(organize(&files)))?;
+        self.apply_all(from_move_ops(organize(&self.tagged_files().collect_vec())))?;
         Ok(())
     }
 
@@ -208,35 +231,25 @@ where
         include: Vec<Tag>,
         exclude: Vec<Tag>,
     ) -> std::io::Result<impl Iterator<Item = TaggedFile>> {
-        let (sender, receiver) = crossbeam_channel::unbounded();
-        self.for_each_tagged_file(move |file| {
-            if include
+        Ok(self.filtered_tagged_files(move |file| {
+            include
                 .iter()
                 .all(|tag| file.tags().contains(&tag.as_ref()))
                 && !exclude
                     .iter()
                     .any(|tag| file.tags().contains(&tag.as_ref()))
-            {
-                sender.send(file).unwrap()
-            }
-        });
-        Ok(receiver.into_iter())
+        }))
     }
 
     fn move_and_organize(
         &self,
         move_ops: Vec<MoveOp>,
+        other_files: Vec<TaggedFile>,
     ) -> Result<Vec<PathBuf>, MoveAndOrganizeError> {
-        let mut files = self.tagged_files().collect_vec();
-        for op in move_ops.iter() {
-            match files.iter_mut().find(|file| file.as_path() == op.from) {
-                Some(f) => {
-                    *f = TaggedFile::from_path(op.to.clone())
-                        .expect("file should be valid after adding tag");
-                }
-                None => return Err(FileNotFoundError(op.from.clone()).into()),
-            }
-        }
+        let mut files = other_files;
+        files.extend(move_ops.iter().map(|op| {
+            TaggedFile::from_path(op.to.clone()).expect("file should be valid after changing tag")
+        }));
 
         let mut organized_move_ops = organize(&files);
         let new_paths = move_ops
@@ -266,6 +279,19 @@ where
     fn tagged_files(&self) -> impl Iterator<Item = TaggedFile> {
         let (sender, receiver) = crossbeam_channel::unbounded();
         self.for_each_tagged_file(move |file| sender.send(file).unwrap());
+        receiver.into_iter()
+    }
+
+    fn filtered_tagged_files(
+        &self,
+        predicate: impl Fn(&TaggedFile) -> bool + Send + Sync + 'static,
+    ) -> impl Iterator<Item = TaggedFile> {
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        self.for_each_tagged_file(move |file| {
+            if predicate(&file) {
+                sender.send(file).unwrap()
+            }
+        });
         receiver.into_iter()
     }
 
@@ -384,6 +410,26 @@ where
     }
 }
 
+fn relevant_files(mut tags: FxHashSet<Tag>, mut files: Vec<TaggedFile>) -> Vec<TaggedFile> {
+    let mut relevant_files = Vec::new();
+    loop {
+        let prev_tags_len = tags.len();
+        let mut i = 0;
+        while i < files.len() {
+            if files[i].tags().any(|tag| tags.contains(tag)) {
+                let file = files.swap_remove(i);
+                tags.extend(file.tags().map(|tag| tag.to_owned()));
+                relevant_files.push(file);
+            } else {
+                i += 1;
+            }
+        }
+        if tags.len() == prev_tags_len {
+            return relevant_files;
+        }
+    }
+}
+
 fn from_move_ops(ops: Vec<MoveOp>) -> impl Iterator<Item = Op> {
     // We know a directory exists
     // if a file is moving from it.
@@ -482,7 +528,10 @@ mod tests {
         let file = TaggedFile::new("foo-_bar".to_owned()).unwrap();
         let filesystem = fake_filesystem_with([&file]);
         filesystem
-            .add(Tag::new("baz".to_owned()).unwrap(), [file])
+            .add(
+                Tag::new("baz".to_owned()).unwrap(),
+                [file].into_iter().collect(),
+            )
             .unwrap();
         assert_eq!(
             list_files(&filesystem.fs),
@@ -497,7 +546,10 @@ mod tests {
         filesystem
             .add(
                 Tag::new("baz".to_owned()).unwrap(),
-                files.map(|file| TaggedFile::new(file.to_owned()).unwrap()),
+                files
+                    .into_iter()
+                    .map(|file| TaggedFile::new(file.to_owned()).unwrap())
+                    .collect(),
             )
             .unwrap();
         assert_eq!(
@@ -518,22 +570,29 @@ mod tests {
         let filesystem = args.filesystem;
         let tags = args.tags;
 
+        filesystem.organize().unwrap();
+
         let files = list_files(&filesystem.fs);
         let file = TaggedFile::from_path(files[file_index % files.len()].clone()).unwrap();
         let tag = tags
             .into_iter()
             .find(|tag| !file.tags().contains(&tag.as_ref()))
-            .unwrap_or(tag);
+            .unwrap_or({
+                prop_assume!(!file.tags().contains(&tag.as_ref()));
+                tag
+            });
 
-        let with_inline = TaggedFilesystem::new(clone_fake_fs(&filesystem.fs));
-        with_inline
-            .fs
-            .rename(&file, file.clone().add_inline_tag(&tag).unwrap().to)
-            .unwrap();
-        with_inline.organize().unwrap();
+        let expected = TaggedFilesystem::new(clone_fake_fs(&filesystem.fs));
+        prop_assume!(expected
+            .apply_all(from_move_ops(vec![file
+                .clone()
+                .add_inline_tag(&tag)
+                .unwrap()]))
+            .is_ok());
+        prop_assume!(expected.organize().is_ok());
 
-        filesystem.add(tag, [file]).unwrap();
-        prop_assert_eq!(list_files(&filesystem.fs), list_files(&with_inline.fs))
+        filesystem.add(tag, [file].into_iter().collect()).unwrap();
+        prop_assert_eq!(list_files(&filesystem.fs), list_files(&expected.fs))
     }
 
     #[test]
@@ -541,7 +600,10 @@ mod tests {
         let file = TaggedFile::new("foo-_bar".to_owned()).unwrap();
         let filesystem = fake_filesystem_with([&file]);
         assert!(filesystem
-            .add(Tag::new("foo".to_owned()).unwrap(), [file])
+            .add(
+                Tag::new("foo".to_owned()).unwrap(),
+                [file].into_iter().collect()
+            )
             .is_err());
     }
 
@@ -552,6 +614,8 @@ mod tests {
             .add(
                 Tag::new("foo".to_owned()).unwrap(),
                 [TaggedFile::new("_bar".to_owned()).unwrap()]
+                    .into_iter()
+                    .collect()
             )
             .is_err());
     }
@@ -561,7 +625,10 @@ mod tests {
         let file = TaggedFile::new("foo-_bar".to_owned()).unwrap();
         let filesystem = fake_filesystem_with([&file]);
         filesystem
-            .del(Tag::new("foo".to_owned()).unwrap(), [file])
+            .del(
+                Tag::new("foo".to_owned()).unwrap(),
+                [file].into_iter().collect(),
+            )
             .unwrap();
         assert_eq!(list_files(&filesystem.fs), ["_bar"].map(PathBuf::from));
     }
@@ -573,7 +640,10 @@ mod tests {
         filesystem
             .del(
                 Tag::new("foo".to_owned()).unwrap(),
-                files.map(|file| TaggedFile::new(file.to_owned()).unwrap()),
+                files
+                    .into_iter()
+                    .map(|file| TaggedFile::new(file.to_owned()).unwrap())
+                    .collect(),
             )
             .unwrap();
         assert_eq!(
@@ -591,6 +661,8 @@ mod tests {
         file_index: usize,
         tag_index: usize,
     ) {
+        filesystem.organize().unwrap();
+
         let files = list_files(&filesystem.fs);
         let file = TaggedFile::from_path(files[file_index % files.len()].clone()).unwrap();
         let tag = file
@@ -599,14 +671,14 @@ mod tests {
             .unwrap()
             .to_owned();
 
-        let without_tag = TaggedFilesystem::new(clone_fake_fs(&filesystem.fs));
-        without_tag
+        let expected = TaggedFilesystem::new(clone_fake_fs(&filesystem.fs));
+        prop_assume!(expected
             .apply_all(from_move_ops(vec![file.clone().del_tag(&tag).unwrap()]))
-            .unwrap();
-        without_tag.organize().unwrap();
+            .is_ok());
+        prop_assume!(expected.organize().is_ok());
 
-        filesystem.del(tag, [file]).unwrap();
-        prop_assert_eq!(list_files(&filesystem.fs), list_files(&without_tag.fs))
+        filesystem.del(tag, [file].into_iter().collect()).unwrap();
+        prop_assert_eq!(list_files(&filesystem.fs), list_files(&expected.fs))
     }
 
     #[test]
@@ -614,7 +686,10 @@ mod tests {
         let file = TaggedFile::new("_bar".to_owned()).unwrap();
         let filesystem = fake_filesystem_with([&file]);
         assert!(filesystem
-            .del(Tag::new("foo".to_owned()).unwrap(), [file])
+            .del(
+                Tag::new("foo".to_owned()).unwrap(),
+                [file].into_iter().collect()
+            )
             .is_err());
     }
 
@@ -625,6 +700,8 @@ mod tests {
             .del(
                 Tag::new("foo".to_owned()).unwrap(),
                 [TaggedFile::new("foo-_bar".to_owned()).unwrap()]
+                    .into_iter()
+                    .collect()
             )
             .is_err());
     }
@@ -651,32 +728,32 @@ mod tests {
         #[strategy(TaggedFilesystem::<FakeFileSystem>::arbitrary_with(TaggedFilesParams {
             min_files: 1, ..TaggedFilesParams::default()
         }))]
-        filesystem: TaggedFilesystem<FakeFileSystem>,
+        expected: TaggedFilesystem<FakeFileSystem>,
         file_index: usize,
     ) {
-        let files = list_files(&filesystem.fs);
+        let files = list_files(&expected.fs);
         let file = TaggedFile::from_path(files[file_index % files.len()].clone()).unwrap();
-
-        let without_file = TaggedFilesystem::new(clone_fake_fs(&filesystem.fs));
-        without_file.fs.remove_file(&file).unwrap();
+        let filesystem = TaggedFilesystem::new(clone_fake_fs(&expected.fs));
+        filesystem.fs.remove_file(&file).unwrap();
         for path in file
             .as_path()
             .ancestors()
             .skip(1)
-            // `filesystem` allows removing `/`,
+            // `FakeFileSystem` allows removing `/`,
             // which results in unexpected behavior.
             .take_while(|path| !path.as_os_str().is_empty())
         {
-            let _ = without_file.fs.remove_dir(path); // Only remove if empty.
+            let _ = filesystem.fs.remove_dir(path); // Only remove if empty.
         }
 
-        filesystem.organize().unwrap();
+        expected.organize().unwrap();
 
-        let path = without_file
+        filesystem.organize().unwrap();
+        let path = filesystem
             .path(file.tags().map(|tag| tag.to_owned()), file.name())
             .unwrap();
-        without_file.fs.create_file(path, "").unwrap();
-        prop_assert_eq!(list_files(&without_file.fs), list_files(&filesystem.fs))
+        filesystem.fs.create_file(path, "").unwrap();
+        prop_assert_eq!(list_files(&filesystem.fs), list_files(&expected.fs))
     }
 
     #[proptest(cases = 20)]
@@ -883,13 +960,18 @@ mod tests {
             .to_owned();
 
         let new_file = filesystem
-            .del(tag.clone(), [file])
+            .del(tag.clone(), [file].into_iter().collect())
             .unwrap()
             .into_iter()
             .next()
             .unwrap();
         filesystem
-            .add(tag, [TaggedFile::from_path(new_file).unwrap()])
+            .add(
+                tag,
+                [TaggedFile::from_path(new_file).unwrap()]
+                    .into_iter()
+                    .collect(),
+            )
             .unwrap();
         prop_assert_eq!(list_files(&filesystem.fs), files)
     }
@@ -905,6 +987,7 @@ mod tests {
     ) {
         let filesystem = args.filesystem;
         let tags = args.tags;
+
         filesystem.organize().unwrap();
 
         let files = list_files(&filesystem.fs);
@@ -912,16 +995,24 @@ mod tests {
         let tag = tags
             .into_iter()
             .find(|tag| !file.tags().contains(&tag.as_ref()))
-            .unwrap_or(tag);
+            .unwrap_or({
+                prop_assume!(!file.tags().contains(&tag.as_ref()));
+                tag
+            });
 
         let new_file = filesystem
-            .add(tag.clone(), [file])
+            .add(tag.clone(), [file].into_iter().collect())
             .unwrap()
             .into_iter()
             .next()
             .unwrap();
         filesystem
-            .del(tag, [TaggedFile::from_path(new_file).unwrap()])
+            .del(
+                tag,
+                [TaggedFile::from_path(new_file).unwrap()]
+                    .into_iter()
+                    .collect(),
+            )
             .unwrap();
         prop_assert_eq!(list_files(&filesystem.fs), files)
     }
