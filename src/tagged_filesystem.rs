@@ -43,22 +43,22 @@ impl From<MoveOp> for Op {
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub enum AddError {
-    HasTagError(#[from] HasTagError),
-    MoveAndOrganizeError(#[from] MoveAndOrganizeError),
+    HasTag(#[from] HasTagError),
+    MoveAndOrganize(#[from] MoveAndOrganizeError),
 }
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub enum DelError {
-    LacksTagError(#[from] LacksTagError),
-    MoveAndOrganizeError(#[from] MoveAndOrganizeError),
+    LacksTag(#[from] LacksTagError),
+    MoveAndOrganize(#[from] MoveAndOrganizeError),
 }
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub enum MoveAndOrganizeError {
-    FileNotFoundError(#[from] FileNotFoundError),
-    FilesystemError(#[from] std::io::Error),
+    FileNotFound(#[from] FileNotFoundError),
+    Filesystem(#[from] std::io::Error),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -68,8 +68,8 @@ pub struct FileNotFoundError(PathBuf);
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub enum PathError {
-    NonUniqueTagError(#[from] NonUniqueTagError),
-    FilesystemError(#[from] std::io::Error),
+    NonUniqueTag(#[from] NonUniqueTagError),
+    Filesystem(#[from] std::io::Error),
 }
 
 #[derive(Debug, thiserror::Error)]
