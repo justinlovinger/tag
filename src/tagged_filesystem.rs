@@ -214,7 +214,7 @@ where
             }
         }
 
-        self.apply_all(from_move_ops(organized_move_ops))?;
+        self.apply_all(from_move_ops(organized_move_ops).collect())?;
         Ok(new_paths)
     }
 
@@ -260,13 +260,13 @@ where
                 organized_move_ops.swap_remove(i);
             }
         }
-        self.apply_all(from_move_ops(organized_move_ops))?;
+        self.apply_all(from_move_ops(organized_move_ops).collect())?;
 
         Ok(enumerated_to.map_or(from, |(_, to)| to))
     }
 
     pub fn organize(&self) -> std::io::Result<()> {
-        self.apply_all(from_move_ops(organize(&self.tagged_files().collect_vec())))?;
+        self.apply_all(from_move_ops(organize(&self.tagged_files().collect_vec())).collect())?;
         Ok(())
     }
 
@@ -344,77 +344,90 @@ where
         }
     }
 
-    fn apply_all<O>(&self, ops: impl Iterator<Item = O>) -> std::io::Result<()>
-    where
-        O: Into<Op>,
-    {
-        for op in ops {
-            self.apply(op)?
+    fn apply_all(&self, ops: Vec<Op>) -> std::io::Result<()> {
+        if let Err(e) = self.apply_all_(&ops) {
+            if self.verbose {
+                println!("Error occured: {e}");
+                println!("Cleaning up");
+            }
+            ops.into_iter()
+                .filter_map(|op| match op {
+                    Op::EnsureDirectory(path) => Some(Op::DeleteDirectoryIfEmpty(path)),
+                    Op::Move(MoveOp { .. }) => None,
+                    Op::DeleteDirectoryIfEmpty(path) => Some(Op::DeleteDirectoryIfEmpty(path)),
+                })
+                .for_each(|op| {
+                    if let Err(e) = self.apply_(&op) {
+                        eprintln!("{e}");
+                    }
+                });
+            Err(e)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn apply_all_<'a>(&self, ops: impl IntoIterator<Item = &'a Op>) -> std::io::Result<()> {
+        for op in ops.into_iter() {
+            self.apply_(op)?
         }
         Ok(())
     }
 
-    fn apply<O>(&self, op: O) -> std::io::Result<()>
-    where
-        O: Into<Op>,
-    {
-        match op.into() {
-            Op::EnsureDirectory(path) => {
-                if self.verbose {
+    fn apply_(&self, op: &Op) -> std::io::Result<()> {
+        if self.verbose {
+            match op {
+                Op::EnsureDirectory(path) => {
                     println!("Ensuring directory `{}` exists", path.display());
                 }
-
-                if self.dry_run {
-                    Ok(())
-                } else {
-                    self.fs.create_dir_all(path)
-                }
-            }
-            Op::Move(MoveOp { from, to }) => {
-                if self.verbose {
+                Op::Move(MoveOp { from, to }) => {
                     println!("Moving `{}` to `{}`", from.display(), to.display());
                 }
-
-                // This utility should only organize data,
-                // never delete it.
-                if self.fs.is_file(&to) {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::AlreadyExists,
-                        format!(
-                            "cannot move `{}` to `{}`, destination already exists",
-                            from.display(),
-                            to.display()
-                        ),
-                    ))
-                } else if self.dry_run {
-                    Ok(())
-                } else {
-                    self.fs.rename(from, to)
-                }
-            }
-            Op::DeleteDirectoryIfEmpty(path) => {
-                if self.verbose {
+                Op::DeleteDirectoryIfEmpty(path) => {
                     println!("Deleting directory `{}` if empty", path.display());
                 }
+            }
+        }
 
-                // Note,
-                // we can do the following with nightly Rust,
-                // which may be more efficient than `self.fs.read_dir(&path)?.next().is_none()`:
-                // ```
-                // if let Err(e) = self.fs.remove_dir(path) {
-                //     if e.kind() != std::io::ErrorKind::DirectoryNotEmpty {
-                //         return Err(e);
-                //     }
-                // }
-                // ```
-                if self.dry_run {
-                    Ok(())
-                } else if self.fs.read_dir(&path)?.next().is_none() {
-                    self.fs.remove_dir(path)
-                } else {
-                    Ok(())
+        if !self.dry_run {
+            match op {
+                Op::EnsureDirectory(path) => self.fs.create_dir_all(path),
+                Op::Move(MoveOp { from, to }) => {
+                    // This utility should only organize data,
+                    // never delete it.
+                    if self.fs.is_file(to) {
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::AlreadyExists,
+                            format!(
+                                "cannot move `{}` to `{}`, destination already exists",
+                                from.display(),
+                                to.display()
+                            ),
+                        ))
+                    } else {
+                        self.fs.rename(from, to)
+                    }
+                }
+                Op::DeleteDirectoryIfEmpty(path) => {
+                    // Note,
+                    // we can do the following with nightly Rust,
+                    // which may be more efficient than `self.fs.read_dir(&path)?.next().is_none()`:
+                    // ```
+                    // if let Err(e) = self.fs.remove_dir(path) {
+                    //     if e.kind() != std::io::ErrorKind::DirectoryNotEmpty {
+                    //         return Err(e);
+                    //     }
+                    // }
+                    // ```
+                    if self.fs.read_dir(path)?.next().is_none() {
+                        self.fs.remove_dir(path)
+                    } else {
+                        Ok(())
+                    }
                 }
             }
+        } else {
+            Ok(())
         }
     }
 }
@@ -687,17 +700,20 @@ mod tests {
 
         let expected = TaggedFilesystem::new(clone_fake_fs(&filesystem.fs));
         prop_assume!(expected
-            .apply_all(from_move_ops(vec![MoveOp {
-                from: file.as_path().to_owned(),
-                to: TaggedFile::from_tags(
-                    file.tags()
-                        .filter(|tag| *tag != del_tag.as_ref())
-                        .chain([add_tag.as_ref()]),
-                    file.name()
-                )
-                .unwrap()
-                .into_path()
-            }]))
+            .apply_all(
+                from_move_ops(vec![MoveOp {
+                    from: file.as_path().to_owned(),
+                    to: TaggedFile::from_tags(
+                        file.tags()
+                            .filter(|tag| *tag != del_tag.as_ref())
+                            .chain([add_tag.as_ref()]),
+                        file.name()
+                    )
+                    .unwrap()
+                    .into_path()
+                }])
+                .collect()
+            )
             .is_ok());
         prop_assume!(expected.organize().is_ok());
 
