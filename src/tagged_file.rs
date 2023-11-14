@@ -4,7 +4,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{types::MoveOp, TagRef, DIR_SEPARATOR, INLINE_SEPARATOR, SEPARATORS, TAG_END};
+use itertools::Itertools;
+
+use crate::{TagRef, DIR_SEPARATOR, INLINE_SEPARATOR, SEPARATORS, TAG_END};
 
 #[derive(Clone, Debug)]
 pub struct TaggedFile {
@@ -55,7 +57,7 @@ impl From<TagIndices> for SliceIndices {
     }
 }
 
-#[derive(Debug, PartialEq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
 #[error("`{0}` is not a tagged file: tagged files must contain zero or more unique tags ended by `{INLINE_SEPARATOR}` or `{DIR_SEPARATOR}` with the tagging portion ended by `{TAG_END}`")]
 pub struct NewError(String);
 
@@ -69,32 +71,6 @@ impl NewError {
     }
 }
 
-#[derive(Debug, PartialEq, thiserror::Error)]
-#[error("`{0}` already has `{1}`")]
-pub struct HasTagError(TaggedFile, String);
-
-impl HasTagError {
-    fn new<T>(file: TaggedFile, tag: T) -> Self
-    where
-        T: AsRef<TagRef>,
-    {
-        Self(file, tag.as_ref().to_string())
-    }
-}
-
-#[derive(Debug, PartialEq, thiserror::Error)]
-#[error("`{0}` lacks `{1}`")]
-pub struct LacksTagError(TaggedFile, String);
-
-impl LacksTagError {
-    fn new<T>(file: TaggedFile, tag: T) -> Self
-    where
-        T: AsRef<TagRef>,
-    {
-        Self(file, tag.as_ref().to_string())
-    }
-}
-
 impl TaggedFile {
     pub fn new(path: String) -> Result<TaggedFile, NewError> {
         let mut tags = Vec::new();
@@ -102,16 +78,16 @@ impl TaggedFile {
         for (i, c) in path.char_indices() {
             if i == tag_start {
                 if c == TAG_END {
-                    let file = TaggedFile {
+                    let this = TaggedFile {
                         // Exclude tag-end from name.
                         name: SliceIndices(i + c.len_utf8(), path.len()),
                         path,
                         tags,
                     };
-                    return if !file.tags_unique() || file.name().contains(DIR_SEPARATOR) {
-                        Err(NewError(file.path))
+                    return if this.tags_unique() && this.name_valid() {
+                        Ok(this)
                     } else {
-                        Ok(file)
+                        Err(NewError(this.path))
                     };
                 } else if SEPARATORS.contains(&c) || c == '.' {
                     // Tag is empty if `c` is separator.
@@ -125,6 +101,30 @@ impl TaggedFile {
             }
         }
         Err(NewError(path))
+    }
+
+    pub fn from_path(path: PathBuf) -> Result<TaggedFile, NewError> {
+        Self::new(
+            path.into_os_string()
+                .into_string()
+                .expect("path should contain valid unicode"),
+        )
+    }
+
+    pub fn from_tags<T, S>(
+        tags: impl IntoIterator<Item = T>,
+        name: S,
+    ) -> Result<TaggedFile, NewError>
+    where
+        T: AsRef<TagRef>,
+        S: AsRef<str>,
+    {
+        let this = unsafe { Self::from_tags_unchecked(tags, name) };
+        if this.tags_unique() && this.name_valid() {
+            Ok(this)
+        } else {
+            Err(NewError(this.path))
+        }
     }
 
     fn tags_unique(&self) -> bool {
@@ -144,12 +144,47 @@ impl TaggedFile {
         true
     }
 
-    pub fn from_path(path: PathBuf) -> Result<TaggedFile, NewError> {
-        Self::new(
-            path.into_os_string()
-                .into_string()
-                .expect("path should contain valid unicode"),
-        )
+    fn name_valid(&self) -> bool {
+        !self.name().contains(DIR_SEPARATOR)
+    }
+
+    /// # Safety
+    ///
+    /// `tags` must not contain duplicates
+    /// and `name` must be valid.
+    pub unsafe fn from_tags_unchecked<T, S>(
+        tags: impl IntoIterator<Item = T>,
+        name: S,
+    ) -> TaggedFile
+    where
+        T: AsRef<TagRef>,
+        S: AsRef<str>,
+    {
+        let mut tag_indices = Vec::new();
+        let mut start = 0;
+
+        let path = format!(
+            "{}_{}",
+            tags.into_iter().format_with("", |tag, f| {
+                let end = start + tag.as_ref().len();
+                tag_indices.push(TagIndices(start, end));
+                start = end + 1;
+
+                f(&tag.as_ref())?;
+                f(&INLINE_SEPARATOR)?;
+                Ok(())
+            }),
+            name.as_ref(),
+        );
+
+        let start = start + 1; // Offset for tag-end character.
+        let name = SliceIndices(start, start + name.as_ref().len());
+
+        Self {
+            path,
+            name,
+            tags: tag_indices,
+        }
     }
 
     pub fn name(&self) -> &str {
@@ -189,86 +224,6 @@ impl TaggedFile {
 
     pub fn into_path(self) -> PathBuf {
         self.path.into()
-    }
-
-    pub(crate) fn add_inline_tag<T>(self, tag: T) -> Result<MoveOp, HasTagError>
-    where
-        T: AsRef<TagRef>,
-    {
-        if self.tags().any(|x| x == tag.as_ref()) {
-            Err(HasTagError::new(self, tag))
-        } else {
-            Ok(MoveOp {
-                to: format!(
-                    "{}{}{}{}{}",
-                    self.tags_str(),
-                    tag.as_ref(),
-                    INLINE_SEPARATOR,
-                    TAG_END,
-                    self.name()
-                )
-                .into(),
-                from: self.into(),
-            })
-        }
-    }
-
-    pub(crate) fn del_tag<T>(self, tag: T) -> Result<MoveOp, LacksTagError>
-    where
-        T: AsRef<TagRef>,
-    {
-        let x = self.indices_of(&tag);
-        match x {
-            Some(x) => Ok(MoveOp {
-                to: format!("{}{}", self.path_up_to(x), self.path_after(x)).into(),
-                from: self.into(),
-            }),
-            None => Err(LacksTagError::new(self, tag)),
-        }
-    }
-
-    /// Return indices corresponding to the given tag
-    /// if this file has the tag.
-    fn indices_of<T>(&self, tag: T) -> Option<TagIndices>
-    where
-        T: AsRef<TagRef>,
-    {
-        self.tags().zip(self.tags.iter()).find_map(|(tag_, i)| {
-            if tag_ == tag.as_ref() {
-                Some(*i)
-            } else {
-                None
-            }
-        })
-    }
-
-    /// Return the path
-    /// from the beginning of the file
-    /// to the start of the tag or name
-    /// corresponding to the given indices.
-    fn path_up_to<T>(&self, x: T) -> &str
-    where
-        T: Into<SliceIndices>,
-    {
-        let x = x.into();
-        // This is safe
-        // because we know `x.0` is the start of a character
-        unsafe { self.path.get_unchecked(..x.0) }
-    }
-
-    /// Return the path
-    /// from the end of the tag
-    /// corresponding to the given indices
-    /// to the end of the file.
-    /// This does not include the tag
-    /// or the separator following the tag.
-    fn path_after(&self, x: TagIndices) -> &str {
-        // This is safe
-        // because `x.1` is always a separator
-        unsafe {
-            self.path
-                .get_unchecked(x.1 + self.separator_of(x).len_utf8()..)
-        }
     }
 
     /// Return the separator
@@ -393,6 +348,29 @@ mod tests {
     }
 
     #[proptest]
+    fn from_tags_matches_new(tags: Vec<Tag>, name: String) {
+        match TaggedFile::from_tags(tags, name) {
+            Ok(file) => {
+                prop_assert_eq!(
+                    TaggedFile::from_path(file.as_path().to_owned()).unwrap(),
+                    file
+                );
+            }
+            Err(e) => {
+                prop_assert_eq!(TaggedFile::from_path(e.clone().into_path()), Err(e));
+            }
+        }
+    }
+
+    #[proptest]
+    fn from_tags_unchecked_returns_correct_file(file: TaggedFile) {
+        prop_assert_eq!(
+            unsafe { TaggedFile::from_tags_unchecked(file.tags(), file.name()) },
+            TaggedFile::from_tags(file.tags(), file.name()).unwrap()
+        );
+    }
+
+    #[proptest]
     fn name_returns_name(raw_file: RawTaggedFile) {
         let file = TaggedFile::new(raw_file.to_string()).unwrap();
         prop_assert_eq!(file.name(), raw_file.name);
@@ -415,63 +393,6 @@ mod tests {
                 .strip_suffix(TAG_END)
                 .unwrap()
         );
-    }
-
-    #[test]
-    fn add_inline_tag_returns_path_with_tag_added() {
-        test_add_inline_tag("foo-_bar", "baz", "foo-baz-_bar");
-        test_add_inline_tag("foo/_bar", "baz", "foo/baz-_bar");
-        test_add_inline_tag("🙂/_bar", "🙁", "🙂/🙁-_bar");
-    }
-
-    fn test_add_inline_tag(file: &str, tag: &str, expected_to: &str) {
-        assert_eq!(
-            TaggedFile::new(file.to_owned())
-                .unwrap()
-                .add_inline_tag(Tag::new(tag.to_owned()).unwrap()),
-            Ok(MoveOp {
-                from: file.into(),
-                to: expected_to.into()
-            })
-        );
-    }
-
-    #[test]
-    fn add_inline_tag_returns_err_if_file_already_has_tag() {
-        assert!(TaggedFile::new("foo-_bar".to_owned())
-            .unwrap()
-            .add_inline_tag(Tag::new("foo".to_owned()).unwrap())
-            .is_err());
-    }
-
-    #[test]
-    fn del_tag_returns_path_with_tag_removed() {
-        test_del_tag("foo-_bar", "foo", "_bar");
-        test_del_tag("foo/_bar", "foo", "_bar");
-        test_del_tag("foo/baz-_bar", "foo", "baz-_bar");
-        test_del_tag("foo-baz/_bar", "baz", "foo-_bar");
-        test_del_tag("foo/baz/_bar", "baz", "foo/_bar");
-        test_del_tag("🙂/🙁-_bar", "🙁", "🙂/_bar");
-    }
-
-    fn test_del_tag(file: &str, tag: &str, expected_to: &str) {
-        assert_eq!(
-            TaggedFile::new(file.to_owned())
-                .unwrap()
-                .del_tag(Tag::new(tag.to_owned()).unwrap()),
-            Ok(MoveOp {
-                from: file.into(),
-                to: expected_to.into()
-            })
-        );
-    }
-
-    #[test]
-    fn del_tag_returns_err_if_file_lacks_tag() {
-        assert!(TaggedFile::new("foo-_bar".to_owned())
-            .unwrap()
-            .del_tag(Tag::new("baz".to_owned()).unwrap())
-            .is_err());
     }
 
     static MAYBE_TAGGED_FILE: Lazy<String> = Lazy::new(|| {

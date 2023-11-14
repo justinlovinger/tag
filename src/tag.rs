@@ -103,6 +103,12 @@ impl<'a> From<&'a TagRef> for Tag {
     }
 }
 
+impl AsRef<TagRef> for TagRef {
+    fn as_ref(&self) -> &TagRef {
+        self
+    }
+}
+
 impl ToOwned for TagRef {
     type Owned = Tag;
 

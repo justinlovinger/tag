@@ -134,8 +134,8 @@ fn main() -> anyhow::Result<()> {
         .build();
     match args.command {
         // Ideally,
-        // Clap would collect `files` as the correct collection,
-        // so we would not need to allocate twice,
+        // Clap would collect `add`, `del`, and `files` as the correct collections,
+        // so we would not need to allocate each twice,
         // see <https://github.com/clap-rs/clap/issues/3114>.
         Some(Commands::Add { tag, files }) => {
             print_paths(filesystem.add(tag, files.into_iter().collect())?)
@@ -143,9 +143,11 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Del { tag, files }) => {
             print_paths(filesystem.del(tag, files.into_iter().collect())?)
         }
-        Some(Commands::Mod { add, del, files }) => {
-            print_paths(filesystem.modify(add, del, files.into_iter().collect())?)
-        }
+        Some(Commands::Mod { add, del, files }) => print_paths(filesystem.modify(
+            add.into_iter().collect(),
+            del.into_iter().collect(),
+            files.into_iter().collect(),
+        )?),
         Some(Commands::Path { tags, name }) => print_paths([filesystem.path(tags, name)?]),
         Some(Commands::Organize) => filesystem.organize()?,
         Some(Commands::Find { include, exclude }) => filesystem
