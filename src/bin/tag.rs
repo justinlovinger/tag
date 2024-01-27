@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use filesystem::OsFileSystem;
+use itertools::Itertools;
 use tag::{Tag, TaggedFile, TaggedFilesystemBuilder, DIR_SEPARATOR, INLINE_SEPARATOR, TAG_END};
 
 #[derive(Parser)]
@@ -108,6 +109,10 @@ enum Commands {
         /// Ignore files including *any* of these tags
         #[clap(long, short, value_name = "TAG", value_parser = tag_parser)]
         exclude: Vec<Tag>,
+
+        /// Sort output by name
+        #[clap(long)]
+        sort_by_name: bool,
     },
 }
 
@@ -150,9 +155,20 @@ fn main() -> anyhow::Result<()> {
         )?),
         Some(Commands::Path { tags, name }) => print_paths([filesystem.path(tags, name)?]),
         Some(Commands::Organize) => filesystem.organize()?,
-        Some(Commands::Find { include, exclude }) => filesystem
-            .find(include, exclude)?
-            .for_each(|file| println!("{file}")),
+        Some(Commands::Find {
+            include,
+            exclude,
+            sort_by_name,
+        }) => {
+            let files = filesystem.find(include, exclude)?;
+            if sort_by_name {
+                files
+                    .sorted_unstable_by(|file, other| file.name().cmp(other.name()))
+                    .for_each(|file| println!("{file}"))
+            } else {
+                files.for_each(|file| println!("{file}"))
+            }
+        }
         None => {}
     }
     Ok(())
