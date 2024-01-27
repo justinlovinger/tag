@@ -1,4 +1,8 @@
-use std::path::PathBuf;
+use std::{
+    fmt,
+    io::{self, Write},
+    path::PathBuf,
+};
 
 use clap::{Parser, Subcommand};
 use filesystem::OsFileSystem;
@@ -143,17 +147,17 @@ fn main() -> anyhow::Result<()> {
         // so we would not need to allocate each twice,
         // see <https://github.com/clap-rs/clap/issues/3114>.
         Some(Commands::Add { tag, files }) => {
-            print_paths(filesystem.add(tag, files.into_iter().collect())?)
+            print_paths(filesystem.add(tag, files.into_iter().collect())?)?
         }
         Some(Commands::Del { tag, files }) => {
-            print_paths(filesystem.del(tag, files.into_iter().collect())?)
+            print_paths(filesystem.del(tag, files.into_iter().collect())?)?
         }
         Some(Commands::Mod { add, del, files }) => print_paths(filesystem.modify(
             add.into_iter().collect(),
             del.into_iter().collect(),
             files.into_iter().collect(),
-        )?),
-        Some(Commands::Path { tags, name }) => print_paths([filesystem.path(tags, name)?]),
+        )?)?,
+        Some(Commands::Path { tags, name }) => print_paths([filesystem.path(tags, name)?])?,
         Some(Commands::Organize) => filesystem.organize()?,
         Some(Commands::Find {
             include,
@@ -162,11 +166,9 @@ fn main() -> anyhow::Result<()> {
         }) => {
             let files = filesystem.find(include, exclude)?;
             if sort_by_name {
-                files
-                    .sorted_unstable_by(|file, other| file.name().cmp(other.name()))
-                    .for_each(|file| println!("{file}"))
+                print(files.sorted_unstable_by(|file, other| file.name().cmp(other.name())))?
             } else {
-                files.for_each(|file| println!("{file}"))
+                print(files)?
             }
         }
         None => {}
@@ -174,10 +176,27 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn print_paths(paths: impl IntoIterator<Item = PathBuf>) {
+fn print_paths(paths: impl IntoIterator<Item = PathBuf>) -> io::Result<()> {
+    let mut out = writer();
     for path in paths {
         // `display()` should not affect results
         // because invalid unicode should error before here.
-        println!("{}", path.display())
+        writeln!(out, "{}", path.display())?
     }
+    Ok(())
+}
+
+fn print<T>(it: impl IntoIterator<Item = T>) -> io::Result<()>
+where
+    T: fmt::Display,
+{
+    let mut out = writer();
+    for item in it {
+        writeln!(out, "{item}")?
+    }
+    Ok(())
+}
+
+fn writer() -> impl Write {
+    io::BufWriter::new(io::stdout().lock())
 }
