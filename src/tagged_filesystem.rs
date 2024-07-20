@@ -1001,6 +1001,43 @@ mod tests {
         assert_eq!(list_files(&filesystem.fs), files)
     }
 
+    #[test]
+    fn organize_uses_directories_if_filename_gets_too_long() {
+        let a = "a".repeat(100);
+        let b = "b".repeat(100);
+        let c = "c".repeat(100);
+
+        // We want to test both unique and non-unique tags.
+        // They may be handled differently.
+        {
+            let filesystem = fake_filesystem_with([format!("{a}/{b}/{c}/_foo")]);
+            filesystem.organize().unwrap();
+            assert_eq!(
+                list_files(&filesystem.fs),
+                [format!("{a}-{b}/{c}-_foo")].map(PathBuf::from),
+            );
+        }
+        {
+            let filesystem =
+                fake_filesystem_with([format!("{a}/{b}/{c}-_bar"), format!("{a}/{b}-{c}-_foo")]);
+            filesystem.organize().unwrap();
+            assert_eq!(
+                list_files(&filesystem.fs),
+                [format!("{a}-{b}/{c}/_bar"), format!("{a}-{b}/{c}/_foo")].map(PathBuf::from),
+            );
+        }
+
+        // The name could make the last inline tag too long.
+        {
+            let filesystem = fake_filesystem_with([format!("{a}/{b}/_{c}")]);
+            filesystem.organize().unwrap();
+            assert_eq!(
+                list_files(&filesystem.fs),
+                [format!("{a}-{b}/_{c}")].map(PathBuf::from),
+            );
+        }
+    }
+
     #[proptest(cases = 20)]
     fn add_inverses_del(
         #[strategy(TaggedFilesystem::<FakeFileSystem>::arbitrary_with(TaggedFilesParams {

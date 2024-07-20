@@ -17,3 +17,10 @@ pub const INLINE_SEPARATOR: char = '-';
 pub const DIR_SEPARATOR: char = '/';
 pub const SEPARATORS: [char; 2] = [INLINE_SEPARATOR, DIR_SEPARATOR];
 pub const TAG_END: char = '_';
+
+// We _could_ examine the actual filesystem
+// to find a more accurate limit.
+// However,
+// then tagged directories may be less portable,
+// and most filesystems have the below limit anyway.
+pub const FILENAME_MAX_LEN: usize = 255;

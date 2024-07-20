@@ -1,7 +1,9 @@
 use internment::Intern;
 use itertools::Itertools;
 
-use crate::{types::MoveOp, Tag, TaggedFile, DIR_SEPARATOR, INLINE_SEPARATOR, TAG_END};
+use crate::{
+    types::MoveOp, Tag, TaggedFile, DIR_SEPARATOR, FILENAME_MAX_LEN, INLINE_SEPARATOR, TAG_END,
+};
 
 use self::partition::{Partition, TagsFiles};
 
@@ -49,51 +51,82 @@ fn tag_to_split(tags_files: &TagsFiles) -> Option<Intern<Tag>> {
 }
 
 fn to_move_ops(files: Partition, prefix: Prefix) -> Vec<MoveOp> {
-    let separators = prefix
-        .iter()
-        .map(|(_, count)| count)
-        .tuple_windows()
-        .map(|(count, next_count)| {
-            if count == next_count {
-                INLINE_SEPARATOR
-            } else {
-                DIR_SEPARATOR
-            }
-        })
-        .chain([DIR_SEPARATOR]);
-    let prefix = format!(
-        "{}",
-        prefix
+    let prefix = {
+        let separators = prefix
             .iter()
-            .map(|(tag, _)| tag)
-            .zip(separators)
-            .format_with("", |(tag, sep), f| {
-                f(&tag)?;
-                f(&sep)?;
-                Ok(())
-            }),
-    );
+            .map(|(tag, count)| (tag.len(), count))
+            .tuple_windows()
+            .map({
+                let mut len = 0;
+                move |((tag_len, count), (next_len, next_count))| {
+                    if count == next_count
+                        && len + tag_len + INLINE_SEPARATOR.len_utf8() + next_len
+                            <= FILENAME_MAX_LEN
+                    {
+                        len += tag_len + INLINE_SEPARATOR.len_utf8();
+                        INLINE_SEPARATOR
+                    } else {
+                        len = 0;
+                        DIR_SEPARATOR
+                    }
+                }
+            })
+            .chain([DIR_SEPARATOR]);
+        format!(
+            "{}",
+            prefix
+                .iter()
+                .map(|(tag, _)| tag)
+                .zip(separators)
+                .format_with("", |(tag, sep), f| {
+                    f(&tag)?;
+                    f(&sep)?;
+                    Ok(())
+                }),
+        )
+    };
+
     files
         .finalize()
-        .map(|(file, mut tags)| {
-            tags.sort_unstable_by(|tag, other| {
-                tag.len()
-                    .cmp(&other.len())
-                    .reverse()
-                    .then_with(|| tag.cmp(other))
-            });
-            (
-                format!(
-                    "{}{}{TAG_END}{}",
-                    &prefix,
-                    tags.into_iter().format_with("", |tag, f| {
+        .map(|(file, mut inline_tags)| {
+            let inline_tags = {
+                inline_tags.sort_unstable_by(|tag, other| {
+                    tag.len()
+                        .cmp(&other.len())
+                        .reverse()
+                        .then_with(|| tag.cmp(other))
+                });
+                let separators = inline_tags
+                    .iter()
+                    .map(|tag| tag.len())
+                    .chain([TAG_END.len_utf8() + file.name().len()])
+                    .tuple_windows()
+                    .map({
+                        let mut len = 0;
+                        move |(tag_len, next_len)| {
+                            if len + tag_len + INLINE_SEPARATOR.len_utf8() + next_len
+                                <= FILENAME_MAX_LEN
+                            {
+                                len += tag_len + INLINE_SEPARATOR.len_utf8();
+                                INLINE_SEPARATOR
+                            } else {
+                                len = 0;
+                                DIR_SEPARATOR
+                            }
+                        }
+                    });
+                inline_tags
+                    .iter()
+                    .zip(separators)
+                    .format_with("", |(tag, sep), f| {
                         f(&tag)?;
-                        f(&INLINE_SEPARATOR)?;
+                        f(&sep)?;
                         Ok(())
-                    }),
-                    file.name()
-                )
-                .into(),
+                    })
+            };
+
+            (
+                format!("{}{}{TAG_END}{}", &prefix, inline_tags, file.name()).into(),
                 file,
             )
         })
