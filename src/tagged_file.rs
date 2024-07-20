@@ -164,7 +164,7 @@ impl TaggedFile {
         let mut start = 0;
 
         let path = format!(
-            "{}_{}",
+            "{}{TAG_END}{}",
             tags.into_iter().format_with("", |tag, f| {
                 let end = start + tag.as_ref().len();
                 tag_indices.push(TagIndices(start, end));
