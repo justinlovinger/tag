@@ -1,43 +1,72 @@
-use std::{collections::BTreeSet, fmt, path::Path};
+use std::{
+    collections::BTreeSet,
+    fmt,
+    fs::{create_dir_all, File},
+    path::Path,
+};
 
-use filesystem::{FakeFileSystem, FileSystem};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use proptest::{
     collection::hash_set,
     prelude::{prop::collection::vec, *},
 };
+use tempfile::TempDir;
 
-use crate::{Tag, TagRef, TaggedFile, TaggedFilesystem, DIR_SEPARATOR, SEPARATORS, TAG_END};
+use crate::{Tag, TagRef, TaggedFile, TaggedFilesystem, SEPARATORS, TAG_END};
 
 pub static SEPARATORS_STRING: Lazy<String> = Lazy::new(|| SEPARATORS.iter().collect());
-static SEPARATORS_AND_ENDS: Lazy<String> = Lazy::new(|| format!("{}{TAG_END}", *SEPARATORS_STRING));
+static _SEPARATORS_AND_ENDS: Lazy<String> =
+    Lazy::new(|| format!("{}{TAG_END}", *SEPARATORS_STRING));
 static SEPARATOR_REGEX: Lazy<String> = Lazy::new(|| format!("[{}]", *SEPARATORS_STRING));
-pub static TAG_REGEX: Lazy<String> = Lazy::new(|| {
-    format!(
-        "[^{}.][^{}]{{1,16}}",
-        *SEPARATORS_AND_ENDS, *SEPARATORS_STRING
-    )
-});
-pub static NAME_REGEX: Lazy<String> = Lazy::new(|| format!("[^{DIR_SEPARATOR}]{{0,16}}"));
+pub static TAG_REGEX: Lazy<String> = Lazy::new(|| "[a-z][a-z_.]{1,16}".to_string());
+pub static NAME_REGEX: Lazy<String> = Lazy::new(|| "[a-z-_.]{0,16}".to_string());
+
+pub fn with_tempdir<F, T>(f: F) -> T
+where
+    F: FnOnce() -> T,
+{
+    // Working directory is not per-thread.
+    static LOCK: Lazy<std::sync::Arc<std::sync::Mutex<()>>> =
+        Lazy::new(|| std::sync::Arc::new(std::sync::Mutex::new(())));
+    // Lock may get poisoned from panicking tests, but that is ok.
+    let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    let cwd = TempDir::with_prefix(std::thread::current().name().map_or_else(
+        || format!("{:?}", std::thread::current().id()),
+        |x| x.to_string().replace(':', "_"),
+    ))
+    .unwrap();
+    std::env::set_current_dir(&cwd).unwrap();
+    let res = (f)();
+    cwd.close().unwrap();
+    res
+}
 
 #[derive(Debug)]
-pub struct TaggedFileSystemWithMetadata {
-    pub filesystem: TaggedFilesystem<FakeFileSystem>,
+pub struct TaggedFilesWithMetadata {
+    pub files: TaggedFiles,
     pub tags: Vec<Tag>,
 }
 
-impl Arbitrary for TaggedFileSystemWithMetadata {
+impl Arbitrary for TaggedFilesWithMetadata {
     type Parameters = TaggedFilesParams;
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         tagged_files_with_metadata_strategy(params)
-            .prop_map(|(files, tags)| Self {
-                filesystem: fake_filesystem_with(files),
-                tags,
-            })
-            .boxed()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TaggedFiles(pub Vec<TaggedFile>);
+
+impl IntoIterator for TaggedFiles {
+    type Item = TaggedFile;
+    type IntoIter = <Vec<TaggedFile> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
@@ -63,39 +92,34 @@ impl Default for TaggedFilesParams {
     }
 }
 
-impl Arbitrary for TaggedFilesystem<FakeFileSystem> {
+impl Arbitrary for TaggedFiles {
     type Parameters = TaggedFilesParams;
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         tagged_files_strategy(params)
-            .prop_map(fake_filesystem_with)
-            .boxed()
     }
 }
 
-pub fn fake_filesystem_with<P>(
-    files: impl IntoIterator<Item = P>,
-) -> TaggedFilesystem<FakeFileSystem>
+pub fn make_filesystem_with<P>(files: impl IntoIterator<Item = P>) -> TaggedFilesystem
 where
     P: AsRef<Path>,
 {
-    let fs = FakeFileSystem::new();
     for file in files.into_iter() {
-        make_file_and_parent(&fs, file.as_ref());
+        make_file_and_parent(file.as_ref());
     }
-    TaggedFilesystem::new(fs)
+    TaggedFilesystem::new()
 }
 
-pub fn tagged_files_strategy(params: TaggedFilesParams) -> BoxedStrategy<Vec<TaggedFile>> {
+fn tagged_files_strategy(params: TaggedFilesParams) -> BoxedStrategy<TaggedFiles> {
     tagged_files_with_metadata_strategy(params)
-        .prop_map(|(files, _)| files)
+        .prop_map(|x| x.files)
         .boxed()
 }
 
 fn tagged_files_with_metadata_strategy(
     params: TaggedFilesParams,
-) -> BoxedStrategy<(Vec<TaggedFile>, Vec<Tag>)> {
+) -> BoxedStrategy<TaggedFilesWithMetadata> {
     hash_set(Tag::arbitrary(), params.min_tag_set..=params.max_tag_set)
         .prop_map(|set| set.into_iter().collect_vec())
         .prop_flat_map(move |tags| {
@@ -136,18 +160,23 @@ fn tagged_files_with_metadata_strategy(
                 Just(tags),
             )
         })
+        .prop_map(|(files, tags)| TaggedFilesWithMetadata {
+            files: TaggedFiles(files),
+            tags,
+        })
         .boxed()
 }
 
-pub fn make_file_and_parent<P>(fs: &FakeFileSystem, path: P)
+pub fn make_file_and_parent<P>(path: P)
 where
     P: AsRef<Path>,
 {
     let path = path.as_ref();
     if let Some(parent) = path.parent() {
-        fs.create_dir_all(parent).unwrap();
+        create_dir_all(parent).unwrap();
     }
-    fs.create_file(path, "").unwrap();
+    // We would prefer this to be `File::create_new`, once it is stable.
+    File::create(path).unwrap();
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

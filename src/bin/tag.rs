@@ -5,7 +5,6 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use filesystem::OsFileSystem;
 use itertools::Itertools;
 use tag::{Tag, TaggedFile, TaggedFilesystemBuilder, DIR_SEPARATOR, INLINE_SEPARATOR, TAG_END};
 
@@ -137,7 +136,7 @@ fn main() -> anyhow::Result<()> {
         std::env::set_current_dir(path)?;
     }
 
-    let filesystem = TaggedFilesystemBuilder::new(OsFileSystem::new())
+    let filesystem = TaggedFilesystemBuilder::new()
         .dry_run(args.dry_run)
         .verbose(args.verbose)
         .build();
