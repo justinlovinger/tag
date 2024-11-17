@@ -13,29 +13,29 @@ mod fs {
     use std::{
         fs::{create_dir_all, File},
         path::Path,
+        sync::{Arc, Mutex},
     };
 
     use once_cell::sync::Lazy;
-    use tempfile::TempDir;
 
     pub fn with_tempdir<F, T>(f: F) -> T
     where
         F: FnOnce() -> T,
     {
-        // Working directory is not per-thread.
-        static LOCK: Lazy<std::sync::Arc<std::sync::Mutex<()>>> =
-            Lazy::new(|| std::sync::Arc::new(std::sync::Mutex::new(())));
-        // Lock may get poisoned from panicking tests, but that is ok.
-        let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let cwd = tempfile::tempdir().unwrap();
 
-        let cwd = TempDir::with_prefix(std::thread::current().name().map_or_else(
-            || format!("{:?}", std::thread::current().id()),
-            |x| x.to_string().replace(':', "_"),
-        ))
-        .unwrap();
+        // Working directory is not per-thread.
+        static LOCK: Lazy<Arc<Mutex<()>>> = Lazy::new(|| Arc::new(Mutex::new(())));
+        // Lock may get poisoned from panicking tests, but that is ok.
+        let lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
         std::env::set_current_dir(&cwd).unwrap();
         let res = (f)();
+
+        drop(lock);
+
         cwd.close().unwrap();
+
         res
     }
 
