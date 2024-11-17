@@ -523,7 +523,7 @@ mod tests {
 
     use crate::{
         testing::{
-            make_file_and_parent, make_filesystem_with, with_tempdir, TagSetTaggedFile,
+            make_file_and_parent, tagged_filesystem_with, with_tempdir, TagSetTaggedFile,
             TaggedFiles, TaggedFilesParams, TaggedFilesWithMetadata,
         },
         Tag,
@@ -535,7 +535,7 @@ mod tests {
     fn mod_renames_file() {
         with_tempdir(|| {
             let file = TaggedFile::new("foo-_baz".to_owned()).unwrap();
-            let filesystem = make_filesystem_with([&file]);
+            let filesystem = tagged_filesystem_with([&file]);
             filesystem
                 .modify(
                     [Tag::new("bar".to_owned()).unwrap()].into_iter().collect(),
@@ -548,7 +548,7 @@ mod tests {
 
         with_tempdir(|| {
             let file = TaggedFile::new("foo-_baz".to_owned()).unwrap();
-            let filesystem = make_filesystem_with([&file]);
+            let filesystem = tagged_filesystem_with([&file]);
             filesystem
                 .modify(
                     [].into_iter().collect(),
@@ -561,7 +561,7 @@ mod tests {
 
         with_tempdir(|| {
             let file = TaggedFile::new("foo-_baz".to_owned()).unwrap();
-            let filesystem = make_filesystem_with([&file]);
+            let filesystem = tagged_filesystem_with([&file]);
             filesystem
                 .modify(
                     [Tag::new("bar".to_owned()).unwrap()].into_iter().collect(),
@@ -577,7 +577,7 @@ mod tests {
     fn mod_renames_all_files() {
         with_tempdir(|| {
             let files = ["foo/_bar", "foo/_foo"];
-            let filesystem = make_filesystem_with(files);
+            let filesystem = tagged_filesystem_with(files);
             filesystem
                 .modify(
                     [Tag::new("bar".to_owned()).unwrap()].into_iter().collect(),
@@ -596,7 +596,7 @@ mod tests {
     fn mod_adds_multiple_tags() {
         with_tempdir(|| {
             let file = TaggedFile::new("foo-_baz".to_owned()).unwrap();
-            let filesystem = make_filesystem_with([&file]);
+            let filesystem = tagged_filesystem_with([&file]);
             filesystem
                 .modify(
                     [
@@ -617,7 +617,7 @@ mod tests {
     fn mod_deletes_multiple_tags() {
         with_tempdir(|| {
             let file = TaggedFile::new("foo-baz-_baz".to_owned()).unwrap();
-            let filesystem = make_filesystem_with([&file]);
+            let filesystem = tagged_filesystem_with([&file]);
             filesystem
                 .modify(
                     [Tag::new("bar".to_owned()).unwrap()].into_iter().collect(),
@@ -643,7 +643,7 @@ mod tests {
         file_index: usize,
     ) {
         let (actual_files, expected_files) = with_tempdir(|| {
-            let filesystem = make_filesystem_with(files);
+            let filesystem = tagged_filesystem_with(files);
 
             filesystem.organize().unwrap();
 
@@ -680,7 +680,7 @@ mod tests {
         let tags = args.tags;
 
         let (actual, (file, del_tag, add_tag)) = with_tempdir(|| {
-            let filesystem = make_filesystem_with(files.0.iter());
+            let filesystem = tagged_filesystem_with(files.0.iter());
 
             filesystem.organize().unwrap();
 
@@ -710,7 +710,7 @@ mod tests {
         })?;
 
         let expected = with_tempdir(|| {
-            let expected = make_filesystem_with(files);
+            let expected = tagged_filesystem_with(files);
 
             prop_assume!(expected
                 .apply_all(
@@ -739,7 +739,7 @@ mod tests {
     fn mod_returns_error_if_file_already_has_tag() {
         with_tempdir(|| {
             let file = TaggedFile::new("foo-_bar".to_owned()).unwrap();
-            let filesystem = make_filesystem_with([&file]);
+            let filesystem = tagged_filesystem_with([&file]);
             assert!(filesystem
                 .modify(
                     [Tag::new("foo".to_owned()).unwrap()].into_iter().collect(),
@@ -754,7 +754,7 @@ mod tests {
     fn mod_returns_error_if_file_lacks_tag() {
         with_tempdir(|| {
             let file = TaggedFile::new("_bar".to_owned()).unwrap();
-            let filesystem = make_filesystem_with([&file]);
+            let filesystem = tagged_filesystem_with([&file]);
             assert!(filesystem
                 .modify(
                     [].into_iter().collect(),
@@ -809,7 +809,7 @@ mod tests {
         file_index: usize,
     ) {
         let expected_files = with_tempdir(|| {
-            let filesystem = make_filesystem_with(files.0.iter());
+            let filesystem = tagged_filesystem_with(files.0.iter());
 
             filesystem.organize().unwrap();
 
@@ -818,7 +818,7 @@ mod tests {
 
         let actual_files = with_tempdir(|| {
             let file = files.0[file_index % files.0.len()].clone();
-            let filesystem = make_filesystem_with(files);
+            let filesystem = tagged_filesystem_with(files);
             remove_file(&file).unwrap();
             for path in file.as_path().ancestors().skip(1) {
                 let _ = remove_dir(path); // Only remove if empty.
@@ -845,7 +845,7 @@ mod tests {
         file_index: usize,
     ) {
         let (actual, expected) = with_tempdir(|| {
-            let filesystem = make_filesystem_with(files);
+            let filesystem = tagged_filesystem_with(files);
 
             filesystem.organize().unwrap();
             let files = list_files();
@@ -880,8 +880,13 @@ mod tests {
     #[test]
     fn organize_moves_files_into_optimal_tag_directories() {
         with_tempdir(|| {
-            let filesystem =
-                make_filesystem_with(["a/b/c/_foo", "a-b-_bar", "d/e-_baz", "🙂/🙁/_fez", "_fiz"]);
+            let filesystem = tagged_filesystem_with([
+                "a/b/c/_foo",
+                "a-b-_bar",
+                "d/e-_baz",
+                "🙂/🙁/_fez",
+                "_fiz",
+            ]);
             filesystem.organize().unwrap();
             assert_eq!(
                 list_files(),
@@ -893,7 +898,7 @@ mod tests {
     #[test]
     fn organize_moves_files_into_optimal_tag_directories_when_all_have_same_tags() {
         with_tempdir(|| {
-            let filesystem = make_filesystem_with(["a-b-c-_bar", "a/b/c/_foo"]);
+            let filesystem = tagged_filesystem_with(["a-b-c-_bar", "a/b/c/_foo"]);
             filesystem.organize().unwrap();
             assert_eq!(
                 list_files(),
@@ -905,7 +910,7 @@ mod tests {
     #[test]
     fn organize_breaks_ties_in_favor_of_increasing_length() {
         with_tempdir(|| {
-            let filesystem = make_filesystem_with(["a/bb/_1", "bb/_2", "a/_3", "dd-ccc-_4"]);
+            let filesystem = tagged_filesystem_with(["a/bb/_1", "bb/_2", "a/_3", "dd-ccc-_4"]);
             filesystem.organize().unwrap();
             assert_eq!(
                 list_files(),
@@ -917,7 +922,7 @@ mod tests {
     #[test]
     fn organize_ignores_untagged_files() {
         with_tempdir(|| {
-            let filesystem = make_filesystem_with(["a/_foo", "a/not-tagged"]);
+            let filesystem = tagged_filesystem_with(["a/_foo", "a/not-tagged"]);
             filesystem.organize().unwrap();
             assert_eq!(list_files(), ["a/not-tagged", "a-_foo"].map(PathBuf::from),)
         })
@@ -969,7 +974,7 @@ mod tests {
     #[proptest(cases = 20)]
     fn organize_is_idempotent(files: TaggedFiles) {
         let (first_pass_files, second_pass_files) = with_tempdir(|| {
-            let filesystem = make_filesystem_with(files);
+            let filesystem = tagged_filesystem_with(files);
 
             filesystem.organize().unwrap();
             let first_pass_files = list_files();
@@ -984,7 +989,7 @@ mod tests {
     #[proptest(cases = 20)]
     fn organize_does_not_change_tags_or_names(files: TaggedFiles) {
         let (organized_files, original_files) = with_tempdir(|| {
-            let filesystem = make_filesystem_with(files);
+            let filesystem = tagged_filesystem_with(files);
 
             let original_files = list_files()
                 .into_iter()
@@ -1009,7 +1014,7 @@ mod tests {
     #[proptest(cases = 20)]
     fn organize_ignores_hidden_files(files: TaggedFiles) {
         let (organized_files, original_files) = with_tempdir(|| {
-            let filesystem = make_filesystem_with(files);
+            let filesystem = tagged_filesystem_with(files);
 
             for path in read_cwd().unwrap().map(|x| x.unwrap()) {
                 rename(&path, format!(".{}", path.display())).unwrap();
@@ -1031,7 +1036,7 @@ mod tests {
         with_tempdir(|| {
             // These files cannot be organized
             // without deleting one or the other.
-            let filesystem = make_filesystem_with(["foo/_bar", "foo-_bar"]);
+            let filesystem = tagged_filesystem_with(["foo/_bar", "foo-_bar"]);
             assert!(filesystem.organize().is_err());
         })
     }
@@ -1071,7 +1076,7 @@ mod tests {
         // We want to test both unique and non-unique tags.
         // They may be handled differently.
         with_tempdir(|| {
-            let filesystem = make_filesystem_with([format!("{a}/{b}/{c}/_foo")]);
+            let filesystem = tagged_filesystem_with([format!("{a}/{b}/{c}/_foo")]);
             filesystem.organize().unwrap();
             assert_eq!(
                 list_files(),
@@ -1081,7 +1086,7 @@ mod tests {
 
         with_tempdir(|| {
             let filesystem =
-                make_filesystem_with([format!("{a}/{b}/{c}-_bar"), format!("{a}/{b}-{c}-_foo")]);
+                tagged_filesystem_with([format!("{a}/{b}/{c}-_bar"), format!("{a}/{b}-{c}-_foo")]);
             filesystem.organize().unwrap();
             assert_eq!(
                 list_files(),
@@ -1091,7 +1096,7 @@ mod tests {
 
         // The name could make the last inline tag too long.
         with_tempdir(|| {
-            let filesystem = make_filesystem_with([format!("{a}/{b}/_{c}")]);
+            let filesystem = tagged_filesystem_with([format!("{a}/{b}/_{c}")]);
             filesystem.organize().unwrap();
             assert_eq!(list_files(), [format!("{a}-{b}/_{c}")].map(PathBuf::from),);
         });
@@ -1107,7 +1112,7 @@ mod tests {
         tag_index: usize,
     ) {
         let (actual, expected) = with_tempdir(|| {
-            let filesystem = make_filesystem_with(files);
+            let filesystem = tagged_filesystem_with(files);
 
             filesystem.organize().unwrap();
 
@@ -1150,7 +1155,7 @@ mod tests {
         tag: Tag,
     ) {
         let (actual, expected) = with_tempdir(|| {
-            let filesystem = make_filesystem_with(args.files);
+            let filesystem = tagged_filesystem_with(args.files);
             let tags = args.tags;
 
             filesystem.organize().unwrap();
@@ -1189,7 +1194,7 @@ mod tests {
     #[test]
     fn find_returns_files_with_tag() {
         with_tempdir(|| {
-            let filesystem = make_filesystem_with(["foo-_1", "bar-_2"]);
+            let filesystem = tagged_filesystem_with(["foo-_1", "bar-_2"]);
             assert_eq!(
                 filesystem
                     .find(vec![Tag::new("foo".into()).unwrap()], vec![])
@@ -1203,7 +1208,7 @@ mod tests {
     #[test]
     fn find_returns_files_with_all_tags() {
         with_tempdir(|| {
-            let filesystem = make_filesystem_with(["foo/bar-_1", "foo/_2"]);
+            let filesystem = tagged_filesystem_with(["foo/bar-_1", "foo/_2"]);
             assert_eq!(
                 filesystem
                     .find(
@@ -1223,7 +1228,7 @@ mod tests {
     #[test]
     fn find_does_not_return_files_with_excluded_tags() {
         with_tempdir(|| {
-            let filesystem = make_filesystem_with(["foo/bar-_1", "foo/_2"]);
+            let filesystem = tagged_filesystem_with(["foo/bar-_1", "foo/_2"]);
             assert_eq!(
                 filesystem
                     .find(
