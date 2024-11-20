@@ -513,10 +513,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::BTreeSet,
-        fs::{remove_file, File},
-    };
+    use std::{collections::BTreeSet, fs::File};
 
     use proptest::prelude::{prop::collection::vec, *};
     use test_strategy::proptest;
@@ -524,7 +521,7 @@ mod tests {
     use crate::{
         testing::{
             make_file_and_parent, tagged_filesystem_with, with_tempdir, TagSetTaggedFile,
-            TaggedFiles, TaggedFilesParams, TaggedFilesWithMetadata,
+            TaggedFiles, TaggedFilesParams,
         },
         Tag,
     };
@@ -640,97 +637,70 @@ mod tests {
             min_files: 1, ..TaggedFilesParams::default()
         }))]
         files: TaggedFiles,
-        file_index: usize,
     ) {
-        let (actual_files, expected_files) = with_tempdir(|| {
+        let (actual, expected) = with_tempdir(|| {
+            let filesystem = tagged_filesystem_with(files.0.iter());
+            filesystem.organize().unwrap();
+
+            let expected = list_files();
+
+            let file = &files.0[0];
+            filesystem
+                .modify(
+                    [].into_iter().collect(),
+                    [].into_iter().collect(),
+                    [TaggedFile::from_path(
+                        filesystem
+                            .path(file.tags().map(|x| x.to_owned()), file.name())
+                            .unwrap(),
+                    )
+                    .unwrap()]
+                    .into_iter()
+                    .collect(),
+                )
+                .unwrap();
+            let actual = list_files();
+
+            (actual, expected)
+        });
+
+        prop_assert_eq!(actual, expected)
+    }
+
+    #[proptest(cases = 20)]
+    fn mod_organizes_files(files: TaggedFiles, file: TaggedFile, tag_to_add: Tag, tag_to_del: Tag) {
+        prop_assume!(tag_to_add != tag_to_del);
+
+        let (actual, expected) = with_tempdir(|| {
             let filesystem = tagged_filesystem_with(files);
 
             filesystem.organize().unwrap();
 
-            let expected_files = list_files();
-
-            let file =
-                TaggedFile::from_path(expected_files[file_index % expected_files.len()].clone())
-                    .unwrap();
-            filesystem
-                .modify(
-                    [].into_iter().collect(),
-                    [].into_iter().collect(),
-                    [file].into_iter().collect(),
+            let path = filesystem
+                .path(
+                    file.tags()
+                        .filter(|file_tag| file_tag != &tag_to_add.as_ref())
+                        .filter(|file_tag| file_tag != &tag_to_del.as_ref())
+                        .map(|x| x.to_owned())
+                        .chain([tag_to_del.clone()]),
+                    file.name(),
                 )
                 .unwrap();
-
-            (list_files(), expected_files)
-        });
-
-        prop_assert_eq!(actual_files, expected_files)
-    }
-
-    #[proptest(cases = 20)]
-    fn mod_organizes_files(
-        #[strategy(TaggedFilesWithMetadata::arbitrary_with(TaggedFilesParams {
-            min_tags: 1, min_files: 1, ..TaggedFilesParams::default()
-        }))]
-        args: TaggedFilesWithMetadata,
-        file_index: usize,
-        tag: Tag,
-        tag_index: usize,
-    ) {
-        let files = args.files;
-        let tags = args.tags;
-
-        let (actual, (file, del_tag, add_tag)) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(files.0.iter());
+            File::create(&path).unwrap();
+            filesystem
+                .modify(
+                    [tag_to_add].into_iter().collect(),
+                    [tag_to_del].into_iter().collect(),
+                    [TaggedFile::from_path(path).unwrap()].into_iter().collect(),
+                )
+                .unwrap();
+            let actual = list_files();
 
             filesystem.organize().unwrap();
+            let expected = list_files();
 
-            let files = list_files();
-            let file = TaggedFile::from_path(files[file_index % files.len()].clone()).unwrap();
-            let del_tag = file
-                .tags()
-                .nth(tag_index % file.tags_len())
-                .unwrap()
-                .to_owned();
-            let add_tag = tags
-                .into_iter()
-                .find(|tag| !file.tags().contains(&tag.as_ref()))
-                .unwrap_or({
-                    prop_assume!(!file.tags().contains(&tag.as_ref()));
-                    tag
-                });
-
-            filesystem
-                .modify(
-                    [add_tag.clone()].into_iter().collect(),
-                    [del_tag.clone()].into_iter().collect(),
-                    [file.clone()].into_iter().collect(),
-                )
-                .unwrap();
-            Ok((list_files(), (file, del_tag, add_tag)))
-        })?;
-
-        let expected = with_tempdir(|| {
-            let expected = tagged_filesystem_with(files);
-
-            prop_assume!(expected
-                .apply_all(
-                    from_move_ops(vec![MoveOp {
-                        from: file.as_path().to_owned(),
-                        to: TaggedFile::from_tags(
-                            file.tags()
-                                .filter(|tag| *tag != del_tag.as_ref())
-                                .chain([add_tag.as_ref()]),
-                            file.name()
-                        )
-                        .unwrap()
-                        .into_path()
-                    }])
-                    .collect()
-                )
-                .is_ok());
-            prop_assume!(expected.organize().is_ok());
-            Ok(list_files())
-        })?;
+            (actual, expected)
+        });
 
         prop_assert_eq!(actual, expected)
     }
@@ -801,39 +771,26 @@ mod tests {
     }
 
     #[proptest(cases = 20)]
-    fn path_organizes_files(
-        #[strategy(TaggedFiles::arbitrary_with(TaggedFilesParams {
-            min_files: 1, ..TaggedFilesParams::default()
-        }))]
-        files: TaggedFiles,
-        file_index: usize,
-    ) {
-        let expected_files = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(files.0.iter());
-
-            filesystem.organize().unwrap();
-
-            list_files()
-        });
-
-        let actual_files = with_tempdir(|| {
-            let file = files.0[file_index % files.0.len()].clone();
+    fn path_organizes_files(files: TaggedFiles, file: TaggedFile) {
+        let (actual, expected) = with_tempdir(|| {
             let filesystem = tagged_filesystem_with(files);
-            remove_file(&file).unwrap();
-            for path in file.as_path().ancestors().skip(1) {
-                let _ = remove_dir(path); // Only remove if empty.
-            }
+            filesystem.organize().unwrap();
+
+            File::create(
+                filesystem
+                    .path(file.tags().map(|tag| tag.to_owned()), file.name())
+                    .unwrap(),
+            )
+            .unwrap();
+            let actual = list_files();
 
             filesystem.organize().unwrap();
-            let path = filesystem
-                .path(file.tags().map(|tag| tag.to_owned()), file.name())
-                .unwrap();
-            File::create(path).unwrap();
+            let expected = list_files();
 
-            list_files()
+            (actual, expected)
         });
 
-        prop_assert_eq!(actual_files, expected_files)
+        prop_assert_eq!(actual, expected)
     }
 
     #[proptest(cases = 20)]
@@ -931,30 +888,27 @@ mod tests {
     #[proptest(cases = 20)]
     fn organize_ignores_nested_tagged_files(
         #[strategy(
-            TaggedFiles::arbitrary_with(TaggedFilesParams { max_tag_set: 10, max_files: 10, ..TaggedFilesParams::default() })
-                .prop_flat_map(|files| {
-                    (
-                        vec(TaggedFiles::arbitrary_with(TaggedFilesParams { max_tag_set: 10, max_files: 10, ..TaggedFilesParams::default() }),
-                        files.0.len()), Just(files)
-                    )
-                })
+            TaggedFiles::arbitrary()
+                .prop_flat_map(|files| (
+                    vec(TaggedFiles::arbitrary(), files.0.len()),
+                    Just(files)
+                ))
                 .prop_map(|(x, y)| (y, x))
         )]
         args: (TaggedFiles, Vec<TaggedFiles>),
     ) {
-        let (dirs, dir_files) = args;
+        let (dirs, dirs_files) = args;
 
         let (actual, expected) = with_tempdir(|| {
             for dir in dirs.0.iter() {
                 create_dir_all(dir.as_path()).unwrap();
             }
             let filesystem = TaggedFilesystem::new();
-
             filesystem.organize().unwrap();
-            for (dir, files) in list_dirs()
-                .into_iter()
-                .filter_map(|path| TaggedFile::from_path(path).ok())
-                .zip(dir_files)
+            for (dir, files) in filesystem
+                .find(Vec::new(), Vec::new())
+                .unwrap()
+                .zip(dirs_files)
             {
                 for file in files {
                     make_file_and_parent(dir.as_path().join(file.as_path()))
@@ -991,23 +945,25 @@ mod tests {
         let (organized_files, original_files) = with_tempdir(|| {
             let filesystem = tagged_filesystem_with(files);
 
-            let original_files = list_files()
-                .into_iter()
-                .map(|file| TaggedFile::from_path(file).unwrap())
-                .collect_vec();
+            let original_files = list_files();
 
             filesystem.organize().unwrap();
-            let organized_files = list_files()
-                .into_iter()
-                .map(|file| TaggedFile::from_path(file).unwrap())
-                .collect_vec();
+            let organized_files = list_files();
 
             (organized_files, original_files)
         });
 
         prop_assert_eq!(
-            BTreeSet::from_iter(organized_files.iter().map(TagSetTaggedFile::new)),
-            BTreeSet::from_iter(original_files.iter().map(TagSetTaggedFile::new))
+            BTreeSet::from_iter(
+                organized_files
+                    .into_iter()
+                    .map(|path| TagSetTaggedFile::new(TaggedFile::from_path(path).unwrap()))
+            ),
+            BTreeSet::from_iter(
+                original_files
+                    .into_iter()
+                    .map(|path| TagSetTaggedFile::new(TaggedFile::from_path(path).unwrap()))
+            )
         );
     }
 
@@ -1019,7 +975,6 @@ mod tests {
             for path in read_cwd().unwrap().map(|x| x.unwrap()) {
                 rename(&path, format!(".{}", path.display())).unwrap();
             }
-
             let original_files = list_files();
 
             filesystem.organize().unwrap();
@@ -1103,31 +1058,27 @@ mod tests {
     }
 
     #[proptest(cases = 20)]
-    fn add_inverses_del(
-        #[strategy(TaggedFiles::arbitrary_with(TaggedFilesParams {
-            min_tags: 1, min_files: 1, ..TaggedFilesParams::default()
-        }))]
-        files: TaggedFiles,
-        file_index: usize,
-        tag_index: usize,
-    ) {
+    fn add_inverses_del(files: TaggedFiles, file: TaggedFile, tag: Tag) {
         let (actual, expected) = with_tempdir(|| {
             let filesystem = tagged_filesystem_with(files);
-
+            let path = filesystem
+                .path(
+                    file.tags()
+                        .filter(|file_tag| file_tag != &tag.as_ref())
+                        .map(|x| x.to_owned())
+                        .chain([tag.clone()]),
+                    file.name(),
+                )
+                .unwrap();
+            File::create(&path).unwrap();
             filesystem.organize().unwrap();
+            let expected = list_files();
 
-            let expected_files = list_files();
-            let file =
-                TaggedFile::from_path(expected_files[file_index % expected_files.len()].clone())
-                    .unwrap();
-            let tag = file
-                .tags()
-                .nth(tag_index % file.tags_len())
-                .unwrap()
-                .to_owned();
-
-            let new_file = filesystem
-                .del(tag.clone(), [file].into_iter().collect())
+            let path = filesystem
+                .del(
+                    tag.clone(),
+                    [TaggedFile::from_path(path).unwrap()].into_iter().collect(),
+                )
                 .unwrap()
                 .into_iter()
                 .next()
@@ -1135,45 +1086,38 @@ mod tests {
             filesystem
                 .add(
                     tag,
-                    [TaggedFile::from_path(new_file).unwrap()]
-                        .into_iter()
-                        .collect(),
+                    [TaggedFile::from_path(path).unwrap()].into_iter().collect(),
                 )
                 .unwrap();
-            (list_files(), expected_files)
+            let actual = list_files();
+
+            (actual, expected)
         });
+
         prop_assert_eq!(actual, expected)
     }
 
     #[proptest(cases = 20)]
-    fn del_inverses_add(
-        #[strategy(TaggedFilesWithMetadata::arbitrary_with(TaggedFilesParams {
-            min_files: 1, ..TaggedFilesParams::default()
-        }))]
-        args: TaggedFilesWithMetadata,
-        file_index: usize,
-        tag: Tag,
-    ) {
+    fn del_inverses_add(files: TaggedFiles, file: TaggedFile, tag: Tag) {
         let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(args.files);
-            let tags = args.tags;
-
+            let filesystem = tagged_filesystem_with(files);
+            let path = filesystem
+                .path(
+                    file.tags()
+                        .filter(|file_tag| file_tag != &tag.as_ref())
+                        .map(|x| x.to_owned()),
+                    file.name(),
+                )
+                .unwrap();
+            File::create(&path).unwrap();
             filesystem.organize().unwrap();
+            let expected = list_files();
 
-            let expected_files = list_files();
-            let file =
-                TaggedFile::from_path(expected_files[file_index % expected_files.len()].clone())
-                    .unwrap();
-            let tag = tags
-                .into_iter()
-                .find(|tag| !file.tags().contains(&tag.as_ref()))
-                .unwrap_or({
-                    prop_assume!(!file.tags().contains(&tag.as_ref()));
-                    tag
-                });
-
-            let new_file = filesystem
-                .add(tag.clone(), [file].into_iter().collect())
+            let path = filesystem
+                .add(
+                    tag.clone(),
+                    [TaggedFile::from_path(path).unwrap()].into_iter().collect(),
+                )
                 .unwrap()
                 .into_iter()
                 .next()
@@ -1181,13 +1125,14 @@ mod tests {
             filesystem
                 .del(
                     tag,
-                    [TaggedFile::from_path(new_file).unwrap()]
-                        .into_iter()
-                        .collect(),
+                    [TaggedFile::from_path(path).unwrap()].into_iter().collect(),
                 )
                 .unwrap();
-            Ok((list_files(), expected_files))
-        })?;
+            let actual = list_files();
+
+            (actual, expected)
+        });
+
         prop_assert_eq!(actual, expected)
     }
 
@@ -1254,18 +1199,5 @@ mod tests {
         }
         files.sort();
         files
-    }
-
-    fn list_dirs() -> Vec<PathBuf> {
-        let mut queue = read_cwd().unwrap().filter_map(|x| x.ok()).collect_vec();
-        let mut dirs = queue.clone();
-        while let Some(file) = queue.pop() {
-            if file.is_dir() {
-                queue.extend(read_dir(&file).unwrap().filter_map(|x| x.ok()));
-                dirs.push(file);
-            }
-        }
-        dirs.sort();
-        dirs
     }
 }

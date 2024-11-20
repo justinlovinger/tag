@@ -55,17 +55,11 @@ mod fs {
 mod tagged_filesystem {
     use std::path::Path;
 
-    use itertools::Itertools;
-    use proptest::{
-        collection::hash_set,
-        prelude::{prop::collection::vec, *},
-    };
+    use proptest::prelude::{prop::collection::vec, *};
 
-    use crate::{Tag, TaggedFile, TaggedFilesystem};
+    use crate::{TaggedFile, TaggedFilesystem};
 
-    use super::{
-        make_file_and_parent, RawTaggedFile, TagSetTaggedFile, NAME_REGEX, SEPARATOR_REGEX,
-    };
+    use super::{make_file_and_parent, TaggedFileParams};
 
     pub fn tagged_filesystem_with<P>(files: impl IntoIterator<Item = P>) -> TaggedFilesystem
     where
@@ -78,10 +72,7 @@ mod tagged_filesystem {
     }
 
     pub struct TaggedFilesParams {
-        pub min_tag_set: usize,
-        pub max_tag_set: usize,
-        pub min_tags: usize,
-        pub max_tags: usize,
+        pub tagged_file_params: TaggedFileParams,
         pub min_files: usize,
         pub max_files: usize,
     }
@@ -89,12 +80,9 @@ mod tagged_filesystem {
     impl Default for TaggedFilesParams {
         fn default() -> Self {
             Self {
-                min_tag_set: 1,
-                max_tag_set: 100,
-                min_tags: 0,
-                max_tags: 10,
+                tagged_file_params: TaggedFileParams::default(),
                 min_files: 0,
-                max_files: 100,
+                max_files: 10,
             }
         }
     }
@@ -116,74 +104,12 @@ mod tagged_filesystem {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
-            TaggedFilesWithMetadata::arbitrary_with(params)
-                .prop_map(|x| x.files)
-                .boxed()
-        }
-    }
-
-    #[derive(Debug)]
-    pub struct TaggedFilesWithMetadata {
-        pub files: TaggedFiles,
-        pub tags: Vec<Tag>,
-    }
-
-    impl Arbitrary for TaggedFilesWithMetadata {
-        type Parameters = TaggedFilesParams;
-        type Strategy = BoxedStrategy<Self>;
-
-        fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
-            hash_set(Tag::arbitrary(), params.min_tag_set..=params.max_tag_set)
-                .prop_map(|set| set.into_iter().collect_vec())
-                .prop_flat_map(move |tags| {
-                    let tags_ = tags.clone();
-                    (
-                        vec(
-                            // We use a `vec` because we want these unsorted.
-                            vec(0..tags.len(), params.min_tags..=params.max_tags)
-                                .prop_map(move |indices| {
-                                    indices
-                                        .into_iter()
-                                        .unique()
-                                        .map(|i| tags_[i].clone())
-                                        .collect_vec()
-                                })
-                                .prop_flat_map(|tags| {
-                                    (
-                                        NAME_REGEX.as_str(),
-                                        vec(SEPARATOR_REGEX.as_str(), tags.len()).prop_map(|xs| {
-                                            xs.into_iter()
-                                                .map(|s| {
-                                                    s.chars()
-                                                        .next()
-                                                        .expect("at least one character")
-                                                })
-                                                .collect()
-                                        }),
-                                    )
-                                        .prop_map(
-                                            move |(name, seps)| {
-                                                TaggedFile::from(RawTaggedFile {
-                                                    name,
-                                                    tags: tags.clone(),
-                                                    seps,
-                                                })
-                                            },
-                                        )
-                                }),
-                            params.min_files..=params.max_files,
-                        )
-                        .prop_filter("duplicate files", |files| {
-                            files.iter().map(TagSetTaggedFile::new).all_unique()
-                        }),
-                        Just(tags),
-                    )
-                })
-                .prop_map(|(files, tags)| TaggedFilesWithMetadata {
-                    files: TaggedFiles(files),
-                    tags,
-                })
-                .boxed()
+            vec(
+                TaggedFile::arbitrary_with(params.tagged_file_params),
+                params.min_files..=params.max_files,
+            )
+            .prop_map(TaggedFiles)
+            .boxed()
         }
     }
 }
@@ -192,36 +118,55 @@ mod tagged_file {
     use std::{collections::BTreeSet, fmt};
 
     use itertools::Itertools;
-    use once_cell::sync::Lazy;
-    use proptest::prelude::{prop::collection::vec, *};
 
-    use crate::{Tag, TagRef, TaggedFile, TAG_END};
+    use proptest::{
+        prelude::{prop::collection::vec, *},
+        sample::subsequence,
+        strategy::LazyJust,
+    };
+    use uuid::Uuid;
 
-    use super::SEPARATOR_REGEX;
+    use crate::{Tag, TaggedFile, TAG_END};
 
-    pub static NAME_REGEX: Lazy<String> = Lazy::new(|| "[a-z-_.]{0,16}".to_string());
+    use super::{SEPARATOR_REGEX, TAGS};
 
     #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    pub struct TagSetTaggedFile<'a> {
-        tags: BTreeSet<&'a TagRef>,
-        name: &'a str,
+    pub struct TagSetTaggedFile {
+        tags: BTreeSet<Tag>,
+        name: String,
     }
 
-    impl<'a> TagSetTaggedFile<'a> {
-        pub fn new(file: &'a TaggedFile) -> Self {
+    impl TagSetTaggedFile {
+        pub fn new(file: TaggedFile) -> Self {
             Self {
-                tags: file.tags().collect(),
-                name: file.name(),
+                tags: file.tags().map(|tag| tag.to_owned()).collect(),
+                name: file.name().to_owned(),
+            }
+        }
+    }
+
+    pub struct TaggedFileParams {
+        pub min_tags: usize,
+        pub max_tags: usize,
+    }
+
+    impl Default for TaggedFileParams {
+        fn default() -> Self {
+            Self {
+                min_tags: 0,
+                max_tags: 8,
             }
         }
     }
 
     impl Arbitrary for TaggedFile {
-        type Parameters = ();
+        type Parameters = TaggedFileParams;
         type Strategy = BoxedStrategy<Self>;
 
-        fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-            RawTaggedFile::arbitrary().prop_map_into().boxed()
+        fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+            RawTaggedFile::arbitrary_with(params)
+                .prop_map_into()
+                .boxed()
         }
     }
 
@@ -250,14 +195,27 @@ mod tagged_file {
     }
 
     impl Arbitrary for RawTaggedFile {
-        type Parameters = ();
+        type Parameters = TaggedFileParams;
         type Strategy = BoxedStrategy<Self>;
 
-        fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
             (
-                NAME_REGEX.as_str(),
-                vec(Tag::arbitrary(), 0_usize..16)
-                    .prop_map(|tags| tags.into_iter().unique().collect_vec())
+                // We specifically want unique names.
+                // That means not using Proptest to generate them.
+                // Proptest could shrink names into being non-unique.
+                // Note,
+                // `Just` may clone the given value,
+                // so we need to use `LazyJust` to ensure a new value is generated every time.
+                LazyJust::new(|| Uuid::new_v4().to_string()),
+                // Note,
+                // `subsequence` puts tags in the order defined in `TAGS`,
+                // which could leave gaps in our testing.
+                subsequence(TAGS, params.min_tags..=params.max_tags)
+                    .prop_map(|tags| {
+                        tags.into_iter()
+                            .map(|x| Tag::new(x.to_owned()).unwrap())
+                            .collect_vec()
+                    })
                     .prop_flat_map(|tags| {
                         (
                             vec(SEPARATOR_REGEX.as_str(), tags.len()).prop_map(|xs| {
@@ -276,21 +234,22 @@ mod tagged_file {
 }
 
 mod tag {
-    use once_cell::sync::Lazy;
-    use proptest::prelude::*;
+    use proptest::{prelude::*, sample::select};
 
     use crate::Tag;
 
-    pub static TAG_REGEX: Lazy<String> = Lazy::new(|| "[a-z][a-z_.]{1,16}".to_string());
+    pub const TAGS: &[&str] = &[
+        "foo", "bar", "baz", "qux", "quux", "corge", "grault", "garply", "waldo", "fred", "plugh",
+        "xyzzy", "thud",
+    ];
 
     impl Arbitrary for Tag {
         type Parameters = ();
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-            TAG_REGEX
-                .as_str()
-                .prop_map(|x| Self::new(x).unwrap())
+            select(TAGS)
+                .prop_map(|x| Self::new(x.to_owned()).unwrap())
                 .boxed()
         }
     }

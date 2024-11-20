@@ -725,6 +725,7 @@ dependencies = [
  "tempfile",
  "test-strategy",
  "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -792,6 +793,16 @@ name = "unicode-ident"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "84a22b9f218b40614adcb3f4ff08b703773ad44fa9423e4e0d346d5db86e4ebc"
+
+[[package]]
+name = "uuid"
+version = "1.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8c5f0a0af699448548ad1a2fbf920fb4bee257eae39953ba95cb84891a0446a"
+dependencies = [
+ "getrandom",
+ "rand",
+]
 
 [[package]]
 name = "version_check"

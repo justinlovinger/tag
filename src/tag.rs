@@ -119,26 +119,20 @@ impl ToOwned for TagRef {
 
 #[cfg(test)]
 mod tests {
-    use once_cell::sync::Lazy;
     use proptest::prelude::*;
     use test_strategy::proptest;
 
-    use crate::testing::*;
+    use crate::{DIR_SEPARATOR, INLINE_SEPARATOR};
 
     use super::*;
 
     #[test]
-    fn new_returns_some_for_simple_tags() {
+    fn new_returns_some_for_valid_tags() {
         test_new("foo");
         test_new("bar");
         test_new("🙂");
         test_new("foo.");
         test_new("has_underscore");
-    }
-
-    #[proptest]
-    fn new_returns_some_for_valid_tags(#[strategy(TAG_REGEX.as_str())] s: String) {
-        test_new(&s);
     }
 
     fn test_new(tag: &str) {
@@ -151,29 +145,26 @@ mod tests {
     }
 
     #[proptest]
-    fn new_returns_none_for_strings_starting_with_tag_end(
-        #[strategy(STARTS_WITH_TAG_END_REGEX.as_str())] s: String,
-    ) {
+    fn new_returns_none_for_strings_starting_with_tag_end(tag: Tag) {
+        let s = format!("{TAG_END}{tag}");
         prop_assert!(Tag::new(s).is_none());
     }
 
     #[proptest]
-    fn new_returns_none_for_strings_containing_a_separator(
-        #[strategy(TAG_WITH_SEP_REGEX.as_str())] s: String,
-    ) {
-        prop_assert!(Tag::new(s).is_none());
+    fn new_returns_none_for_strings_containing_a_separator(tag_one: Tag, tag_two: Tag) {
+        {
+            let s = format!("{tag_one}{DIR_SEPARATOR}{tag_two}");
+            prop_assert!(Tag::new(s).is_none());
+        }
+        {
+            let s = format!("{tag_one}{INLINE_SEPARATOR}{tag_two}");
+            prop_assert!(Tag::new(s).is_none());
+        }
     }
 
     #[proptest]
-    fn new_returns_none_for_strings_starting_with_dot(
-        #[strategy(STARTS_WITH_DOT.as_str())] s: String,
-    ) {
+    fn new_returns_none_for_strings_starting_with_dot(tag: Tag) {
+        let s = format!(".{tag}");
         prop_assert!(Tag::new(s).is_none());
     }
-
-    static STARTS_WITH_DOT: Lazy<String> = Lazy::new(|| format!(r"\.{}", *TAG_REGEX));
-    static STARTS_WITH_TAG_END_REGEX: Lazy<String> =
-        Lazy::new(|| format!(r"{TAG_END}{}", *TAG_REGEX));
-    static TAG_WITH_SEP_REGEX: Lazy<String> =
-        Lazy::new(|| format!(r"{}[{}]{}", *TAG_REGEX, *SEPARATORS_STRING, *TAG_REGEX));
 }

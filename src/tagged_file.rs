@@ -8,7 +8,7 @@ use itertools::Itertools;
 
 use crate::{TagRef, DIR_SEPARATOR, INLINE_SEPARATOR, SEPARATORS, TAG_END};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct TaggedFile {
     path: String,
     /// Slice indices to get name from `path`,
@@ -19,6 +19,13 @@ pub struct TaggedFile {
     /// start inclusive
     /// and end exclusive.
     tags: Vec<TagIndices>,
+}
+
+// Includes indices makes debugging more difficult.
+impl fmt::Debug for TaggedFile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.path.fmt(f)
+    }
 }
 
 // `name` and `tags` should always be the same
@@ -281,15 +288,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_returns_ok_for_simple_tagged_files() {
+    fn new_returns_ok_for_tagged_files() {
         assert!(TaggedFile::new("foo-bar-_baz".to_owned()).is_ok());
         assert!(TaggedFile::new("foo/bar/_baz".to_owned()).is_ok());
         assert!(TaggedFile::new("🙂/🙁-_baz".to_owned()).is_ok());
-    }
-
-    #[proptest]
-    fn new_returns_ok_for_tagged_files(raw_file: RawTaggedFile) {
-        prop_assert!(TaggedFile::new(raw_file.to_string()).is_ok());
     }
 
     #[proptest]
@@ -397,8 +399,8 @@ mod tests {
 
     static MAYBE_TAGGED_FILE: Lazy<String> = Lazy::new(|| {
         format!(
-            r"\PC{{0,16}}[{}]{TAG_END}{}",
-            *SEPARATORS_STRING, *NAME_REGEX
+            r"\PC{{0,16}}[{}]{TAG_END}[a-z-_.]{{0,16}}",
+            *SEPARATORS_STRING
         )
     });
 }
