@@ -1,43 +1,65 @@
 [![Workflow Status](https://github.com/justinlovinger/tag/workflows/build/badge.svg)](https://github.com/justinlovinger/tag/actions?query=workflow%3A%22build%22)
 
-# tag
+# Tag
 
 A utility to automatically organize files with a simple tagging system.
 
 ## Syntax
 
-A tagged file consists of zero or more tags
+A tagged filesystem stores metadata in `.tag/`
+and tagged paths outside `.tag/`.
+Tagged filesystems can be nested,
+meaning tagged directories can be tagged filesystems.
+
+Files are stored in `.tag/files/`,
+with the structure,
+`.tag/files/NAME`.
+
+Tags are stored in `.tag/tags/`
+with the structure,
+`.tag/tags/NAME/NAMESPACE/TAG`.
+The Tag program uses the namespace: `tag`.
+An arbitrary number of namespaces can be defined.
+Tags from all namespaces are used for building tagged paths.
+
+Links to files are stored outside `.tag/`.
+Each link is a tagged path.
+A tagged path consists of zero or more tags
 and a name.
 Each tag ends with `-` or `/`.
 Tags are separated from name by `_` directly following the end of a tag.
 For example,
 `foo-bar/_baz`
-is a file named `baz`
+is a path named `baz`
 with tags `foo` and `bar`.
 `foo/bar-_baz`,
 `foo-bar-_baz`,
 and `foo/bar/_baz`
 are equivalent.
 Tags cannot start with `.`.
-Tagged files cannot have the same tag more than once.
+Tagged paths cannot have the same tag more than once.
 Tag order is arbitrary.
-Name can be an empty string,
-such as `foo-_`.
 
 ## Terminology
 
-A "tagged file" is a file with the above syntax.
+A "tagged path" is a link to a file.
+It stores tags and a name in its path.
 It may have zero tags.
-A directory with the above syntax is also a "tagged file".
-This utility makes no distinction
-between tagged directories
-and regular tagged files.
 
-A "tagged filesystem" is a directory containing tagged files.
-The term does *not* imply a separately mounted filesystem.
+An "inline-tag" is a tag in a tagged path ended by `-`.
 
-An inline-tag is a tag ended by `-`.
-A directory-tag is a tag ended by `/`.
+A "directory-tag" is a tag in a tagged path ended by `/`.
+
+A "tagged file" is a file or directory in `.tag/files/`.
+The term refers to both tagged directories
+and tagged regular files.
+
+A "name" is the name of a file in `.tag/files/`,
+including extension.
+
+A "tagged filesystem" is a directory containing tagged files
+and tagged paths.
+The term does _not_ imply a separately mounted filesystem.
 
 ## Building
 
@@ -47,23 +69,18 @@ Run `cargo build --release` or `nix build`.
 
 See `tag --help` and `tag [COMMAND] --help` for detailed usage instructions.
 
-## Tips
+Initialize a tagged filesystem using `tag init`.
 
-Make the top-level of your tagged filesystem a tagged directory.
-For example,
-`_tagged-files`
-instead of `tagged-files`.
-This prevents accidentally moving files out of a tagged filesystem
-if the utility is called from the wrong directory.
-Also,
-future changes may require a tagged directory at the top-level of a tagged filesystem.
-
-Nest tagged filesystems.
-For example,
-`_data/_journal`.
-Nesting tagged filesystems prevents files in the nested filesystem from moving out,
-but the directory corresponding to the nested tagged filesystem is still organized
-in the context of its parent tagged filesystem.
+Files in `.tag/files/`
+and tags in `.tag/tags/`
+can be manually manipulated,
+changed,
+added,
+moved,
+etc.
+Tags in the `tag` namespace can also be manually changed.
+`tag build` updates tags and tagged paths according to manual changes.
+All commands other than `tag build` are technically optional.
 
 ## Planned features
 
@@ -71,13 +88,9 @@ in the context of its parent tagged filesystem.
 
 Tags may imply other tags.
 For example,
-`rust` may imply `programming`.
-Implied tags would be defined by each user
-and may require a special directory
-at the top-level of a tagged filesystem,
-not unlike `.git`.
-Details of how implied tags are represented
-are not finalized.
+`rust` may imply `code`.
+Implied tags may be handled by a separate program.
+The program would add tags to its own namespace.
 
 ### Inferred tags
 
@@ -88,6 +101,6 @@ For example,
 a directory containing `Cargo.toml`
 may infer `rust`.
 Machine-learning may be used to learn inferred tags.
-Inferred tags would be defined by each user
+Inferred tags could be defined by each user
 or learned on a per-user basis.
 Machine-learning would not involve uploading any data.

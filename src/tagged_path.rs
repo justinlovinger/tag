@@ -6,10 +6,10 @@ use std::{
 
 use itertools::Itertools;
 
-use crate::{TagRef, DIR_SEPARATOR, INLINE_SEPARATOR, SEPARATORS, TAG_END};
+use crate::{NameRef, TagRef, DIR_SEPARATOR, INLINE_SEPARATOR, SEPARATORS, TAG_END};
 
 #[derive(Clone)]
-pub struct TaggedFile {
+pub struct TaggedPath {
     path: String,
     /// Slice indices to get name from `path`,
     /// start inclusive
@@ -22,7 +22,7 @@ pub struct TaggedFile {
 }
 
 // Includes indices makes debugging more difficult.
-impl fmt::Debug for TaggedFile {
+impl fmt::Debug for TaggedPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.path.fmt(f)
     }
@@ -30,23 +30,23 @@ impl fmt::Debug for TaggedFile {
 
 // `name` and `tags` should always be the same
 // for a given `path`.
-impl Eq for TaggedFile {}
-impl PartialEq for TaggedFile {
+impl Eq for TaggedPath {}
+impl PartialEq for TaggedPath {
     fn eq(&self, other: &Self) -> bool {
         self.path.eq(&other.path)
     }
 }
-impl Ord for TaggedFile {
+impl Ord for TaggedPath {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.path.cmp(&other.path)
     }
 }
-impl PartialOrd for TaggedFile {
+impl PartialOrd for TaggedPath {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
-impl Hash for TaggedFile {
+impl Hash for TaggedPath {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.path.hash(state)
     }
@@ -65,7 +65,7 @@ impl From<TagIndices> for SliceIndices {
 }
 
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
-#[error("`{0}` is not a tagged file: tagged files must contain zero or more unique tags ended by `{INLINE_SEPARATOR}` or `{DIR_SEPARATOR}` with the tagging portion ended by `{TAG_END}`")]
+#[error("`{0}` is not a tagged path: tagged paths must contain zero or more unique tags ended by `{INLINE_SEPARATOR}` or `{DIR_SEPARATOR}` with the tagging portion ended by `{TAG_END}`")]
 pub struct NewError(String);
 
 impl NewError {
@@ -78,14 +78,14 @@ impl NewError {
     }
 }
 
-impl TaggedFile {
-    pub fn new(path: String) -> Result<TaggedFile, NewError> {
+impl TaggedPath {
+    pub fn new(path: String) -> Result<TaggedPath, NewError> {
         let mut tags = Vec::new();
         let mut tag_start = 0;
         for (i, c) in path.char_indices() {
             if i == tag_start {
                 if c == TAG_END {
-                    let this = TaggedFile {
+                    let this = TaggedPath {
                         // Exclude tag-end from name.
                         name: SliceIndices(i + c.len_utf8(), path.len()),
                         path,
@@ -110,7 +110,7 @@ impl TaggedFile {
         Err(NewError(path))
     }
 
-    pub fn from_path(path: PathBuf) -> Result<TaggedFile, NewError> {
+    pub fn from_path(path: PathBuf) -> Result<TaggedPath, NewError> {
         Self::new(
             path.into_os_string()
                 .into_string()
@@ -118,16 +118,16 @@ impl TaggedFile {
         )
     }
 
-    pub fn from_tags<T, S>(
+    pub fn from_tags<T, N>(
         tags: impl IntoIterator<Item = T>,
-        name: S,
-    ) -> Result<TaggedFile, NewError>
+        name: N,
+    ) -> Result<TaggedPath, NewError>
     where
         T: AsRef<TagRef>,
-        S: AsRef<str>,
+        N: AsRef<NameRef>,
     {
         let this = unsafe { Self::from_tags_unchecked(tags, name) };
-        if this.tags_unique() && this.name_valid() {
+        if this.tags_unique() {
             Ok(this)
         } else {
             Err(NewError(this.path))
@@ -152,20 +152,20 @@ impl TaggedFile {
     }
 
     fn name_valid(&self) -> bool {
-        !self.name().contains(DIR_SEPARATOR)
+        !self.name().as_str().contains(DIR_SEPARATOR)
     }
 
     /// # Safety
     ///
     /// `tags` must not contain duplicates
     /// and `name` must be valid.
-    pub unsafe fn from_tags_unchecked<T, S>(
+    pub unsafe fn from_tags_unchecked<T, N>(
         tags: impl IntoIterator<Item = T>,
-        name: S,
-    ) -> TaggedFile
+        name: N,
+    ) -> TaggedPath
     where
         T: AsRef<TagRef>,
-        S: AsRef<str>,
+        N: AsRef<NameRef>,
     {
         let mut tag_indices = Vec::new();
         let mut start = 0;
@@ -194,8 +194,8 @@ impl TaggedFile {
         }
     }
 
-    pub fn name(&self) -> &str {
-        self.slice(self.name)
+    pub fn name(&self) -> &NameRef {
+        NameRef::new(self.slice(self.name))
     }
 
     pub fn tags(&self) -> impl Iterator<Item = &TagRef> {
@@ -253,25 +253,25 @@ impl TaggedFile {
     }
 }
 
-impl fmt::Display for TaggedFile {
+impl fmt::Display for TaggedPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.path.fmt(f)
     }
 }
 
-impl From<TaggedFile> for PathBuf {
-    fn from(value: TaggedFile) -> Self {
+impl From<TaggedPath> for PathBuf {
+    fn from(value: TaggedPath) -> Self {
         value.path.into()
     }
 }
 
-impl AsRef<Path> for TaggedFile {
+impl AsRef<Path> for TaggedPath {
     fn as_ref(&self) -> &Path {
         self.path.as_ref()
     }
 }
 
-impl AsRef<str> for TaggedFile {
+impl AsRef<str> for TaggedPath {
     fn as_ref(&self) -> &str {
         self.path.as_ref()
     }
@@ -283,30 +283,30 @@ mod tests {
     use proptest::prelude::*;
     use test_strategy::proptest;
 
-    use crate::{testing::*, Tag};
+    use crate::{testing::*, Name, Tag};
 
     use super::*;
 
     #[test]
-    fn new_returns_ok_for_tagged_files() {
-        assert!(TaggedFile::new("foo-bar-_baz".to_owned()).is_ok());
-        assert!(TaggedFile::new("foo/bar/_baz".to_owned()).is_ok());
-        assert!(TaggedFile::new("🙂/🙁-_baz".to_owned()).is_ok());
+    fn new_returns_ok_for_tagged_paths() {
+        assert!(TaggedPath::new("foo-bar-_baz".to_owned()).is_ok());
+        assert!(TaggedPath::new("foo/bar/_baz".to_owned()).is_ok());
+        assert!(TaggedPath::new("🙂/🙁-_baz".to_owned()).is_ok());
     }
 
     #[proptest]
-    fn new_returns_ok_iff_all_tags_are_valid(#[strategy(MAYBE_TAGGED_FILE.as_str())] s: String) {
-        // This test intentionally allows some invalid files
-        // to ensure a wide variety of files are tested.
-        if let Ok(file) = TaggedFile::new(s) {
-            for tag in file.tags() {
+    fn new_returns_ok_iff_all_tags_are_valid(#[strategy(MAYBE_TAGGED_PATH.as_str())] s: String) {
+        // This test intentionally allows some invalid paths
+        // to ensure a wide variety of paths are tested.
+        if let Ok(path) = TaggedPath::new(s) {
+            for tag in path.tags() {
                 prop_assert!(Tag::new(tag.to_string()).is_some())
             }
         }
     }
 
     #[proptest]
-    fn new_returns_err_for_non_tagged_files(s: String) {
+    fn new_returns_err_for_non_tagged_paths(s: String) {
         prop_assume!(
             !(s.starts_with(TAG_END)
                 || SEPARATORS
@@ -314,90 +314,90 @@ mod tests {
                     .iter()
                     .any(|ended_sep| s.contains(ended_sep)))
         );
-        prop_assert!(TaggedFile::new(s).is_err());
+        prop_assert!(TaggedPath::new(s).is_err());
     }
 
     #[test]
-    fn new_returns_err_for_files_with_empty_tags() {
-        assert!(TaggedFile::new("-bar-_baz".to_owned()).is_err());
-        assert!(TaggedFile::new("foo--_baz".to_owned()).is_err());
-        assert!(TaggedFile::new("/bar-_baz".to_owned()).is_err());
-        assert!(TaggedFile::new("foo/-_baz".to_owned()).is_err());
-        assert!(TaggedFile::new("foo-/_baz".to_owned()).is_err());
+    fn new_returns_err_for_paths_with_empty_tags() {
+        assert!(TaggedPath::new("-bar-_baz".to_owned()).is_err());
+        assert!(TaggedPath::new("foo--_baz".to_owned()).is_err());
+        assert!(TaggedPath::new("/bar-_baz".to_owned()).is_err());
+        assert!(TaggedPath::new("foo/-_baz".to_owned()).is_err());
+        assert!(TaggedPath::new("foo-/_baz".to_owned()).is_err());
     }
 
     #[test]
     fn new_returns_err_for_tags_starting_with_dot() {
-        assert!(TaggedFile::new(".-_baz".to_owned()).is_err());
-        assert!(TaggedFile::new(".bar-_baz".to_owned()).is_err());
-        assert!(TaggedFile::new("foo-.-_baz".to_owned()).is_err());
-        assert!(TaggedFile::new("foo-.bar-_baz".to_owned()).is_err());
+        assert!(TaggedPath::new(".-_baz".to_owned()).is_err());
+        assert!(TaggedPath::new(".bar-_baz".to_owned()).is_err());
+        assert!(TaggedPath::new("foo-.-_baz".to_owned()).is_err());
+        assert!(TaggedPath::new("foo-.bar-_baz".to_owned()).is_err());
     }
 
     #[test]
     fn new_returns_err_if_there_are_duplicate_tags() {
-        assert!(TaggedFile::new("foo-foo-_baz".to_owned()).is_err());
-        assert!(TaggedFile::new("foo/foo/_baz".to_owned()).is_err());
-        assert!(TaggedFile::new("foo-bar/foo/_baz".to_owned()).is_err());
-        assert!(TaggedFile::new("bar/foo-foo/_baz".to_owned()).is_err());
+        assert!(TaggedPath::new("foo-foo-_baz".to_owned()).is_err());
+        assert!(TaggedPath::new("foo/foo/_baz".to_owned()).is_err());
+        assert!(TaggedPath::new("foo-bar/foo/_baz".to_owned()).is_err());
+        assert!(TaggedPath::new("bar/foo-foo/_baz".to_owned()).is_err());
     }
 
     #[test]
     fn new_returns_err_if_name_contains_dir_separator() {
-        assert!(TaggedFile::new("foo-_baz/biz".to_owned()).is_err());
-        assert!(TaggedFile::new("foo/_/".to_owned()).is_err());
-        assert!(TaggedFile::new("foo/_/baz".to_owned()).is_err());
+        assert!(TaggedPath::new("foo-_baz/biz".to_owned()).is_err());
+        assert!(TaggedPath::new("foo/_/".to_owned()).is_err());
+        assert!(TaggedPath::new("foo/_/baz".to_owned()).is_err());
     }
 
     #[proptest]
-    fn from_tags_matches_new(tags: Vec<Tag>, name: String) {
-        match TaggedFile::from_tags(tags, name) {
-            Ok(file) => {
+    fn from_tags_matches_new(tags: Vec<Tag>, name: Name) {
+        match TaggedPath::from_tags(tags, name) {
+            Ok(path) => {
                 prop_assert_eq!(
-                    TaggedFile::from_path(file.as_path().to_owned()).unwrap(),
-                    file
+                    TaggedPath::from_path(path.as_path().to_owned()).unwrap(),
+                    path
                 );
             }
             Err(e) => {
-                prop_assert_eq!(TaggedFile::from_path(e.clone().into_path()), Err(e));
+                prop_assert_eq!(TaggedPath::from_path(e.clone().into_path()), Err(e));
             }
         }
     }
 
     #[proptest]
-    fn from_tags_unchecked_returns_correct_file(file: TaggedFile) {
+    fn from_tags_unchecked_returns_correct_path(path: TaggedPath) {
         prop_assert_eq!(
-            unsafe { TaggedFile::from_tags_unchecked(file.tags(), file.name()) },
-            TaggedFile::from_tags(file.tags(), file.name()).unwrap()
+            unsafe { TaggedPath::from_tags_unchecked(path.tags(), path.name()) },
+            TaggedPath::from_tags(path.tags(), path.name()).unwrap()
         );
     }
 
     #[proptest]
-    fn name_returns_name(raw_file: RawTaggedFile) {
-        let file = TaggedFile::new(raw_file.to_string()).unwrap();
-        prop_assert_eq!(file.name(), raw_file.name);
+    fn name_returns_name(raw_path: RawTaggedPath) {
+        let path = TaggedPath::new(raw_path.to_string()).unwrap();
+        prop_assert_eq!(path.name(), raw_path.name.as_ref());
     }
 
     #[proptest]
-    fn tags_returns_all_tags(raw_file: RawTaggedFile) {
-        let file = TaggedFile::new(raw_file.to_string()).unwrap();
-        prop_assert_eq!(file.tags().collect::<Vec<_>>(), raw_file.tags);
+    fn tags_returns_all_tags(raw_path: RawTaggedPath) {
+        let path = TaggedPath::new(raw_path.to_string()).unwrap();
+        prop_assert_eq!(path.tags().collect::<Vec<_>>(), raw_path.tags);
     }
 
     #[proptest]
-    fn tags_str_returns_string_of_all_tags_with_separators(raw_file: RawTaggedFile) {
-        let file = TaggedFile::new(raw_file.to_string()).unwrap();
-        let path = raw_file.to_string();
+    fn tags_str_returns_string_of_all_tags_with_separators(raw_path: RawTaggedPath) {
+        let tagged_path = TaggedPath::new(raw_path.to_string()).unwrap();
+        let path = raw_path.to_string();
         prop_assert_eq!(
-            file.tags_str(),
-            path.strip_suffix(&raw_file.name)
+            tagged_path.tags_str(),
+            path.strip_suffix(raw_path.name.as_str())
                 .unwrap()
                 .strip_suffix(TAG_END)
                 .unwrap()
         );
     }
 
-    static MAYBE_TAGGED_FILE: Lazy<String> = Lazy::new(|| {
+    static MAYBE_TAGGED_PATH: Lazy<String> = Lazy::new(|| {
         format!(
             r"\PC{{0,16}}[{}]{TAG_END}[a-z-_.]{{0,16}}",
             *SEPARATORS_STRING

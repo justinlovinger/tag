@@ -1,17 +1,27 @@
+mod fs;
+mod name;
 mod organize;
+mod root;
 mod tag;
-mod tagged_file;
 mod tagged_filesystem;
+mod tagged_path;
 mod types;
 
 #[cfg(test)]
 mod testing;
 
 pub use crate::{
+    name::{Name, NameRef},
+    root::Root,
     tag::{Tag, TagRef},
-    tagged_file::TaggedFile,
     tagged_filesystem::{TaggedFilesystem, TaggedFilesystemBuilder},
+    tagged_path::TaggedPath,
 };
+
+pub const METADATA_DIR: &str = ".tag";
+pub const FILES_DIR: &str = "files";
+pub const TAGS_DIR: &str = "tags";
+pub const PROGRAM_TAGS_DIR: &str = "tag";
 
 pub const INLINE_SEPARATOR: char = '-';
 pub const DIR_SEPARATOR: char = '/';
@@ -23,4 +33,4 @@ pub const TAG_END: char = '_';
 // However,
 // then tagged directories may be less portable,
 // and most filesystems have the below limit anyway.
-pub const FILENAME_MAX_LEN: usize = 255;
+pub const PATH_PART_MAX_LEN: usize = 255;

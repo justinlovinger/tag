@@ -2,21 +2,21 @@ use internment::Intern;
 use itertools::Itertools;
 
 use crate::{
-    types::MoveOp, Tag, TaggedFile, DIR_SEPARATOR, FILENAME_MAX_LEN, INLINE_SEPARATOR, TAG_END,
+    types::MoveOp, Tag, TaggedPath, DIR_SEPARATOR, INLINE_SEPARATOR, PATH_PART_MAX_LEN, TAG_END,
 };
 
-use self::partition::{Partition, TagsFiles};
+use self::partition::{Partition, TagsPaths};
 
 type Prefix = Vec<(Intern<Tag>, usize)>; // (tag, count)
 
-pub fn organize(files: &[TaggedFile]) -> Vec<MoveOp> {
-    _organize(Partition::new(files), Default::default())
+pub fn organize(paths: &[TaggedPath]) -> Vec<MoveOp> {
+    _organize(Partition::new(paths), Default::default())
 }
 
-fn _organize(files: Partition, prefix: Prefix) -> Vec<MoveOp> {
+fn _organize(paths: Partition, prefix: Prefix) -> Vec<MoveOp> {
     stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
-        if let Some(tag) = tag_to_split(files.tags_files()) {
-            let (with_tag, without_tag) = files.partition(tag);
+        if let Some(tag) = tag_to_split(paths.tags_paths()) {
+            let (with_tag, without_tag) = paths.partition(tag);
             debug_assert_ne!(with_tag.len(), 0);
 
             let with_tag_prefix = prefix
@@ -31,16 +31,16 @@ fn _organize(files: Partition, prefix: Prefix) -> Vec<MoveOp> {
             xs.extend(ys);
             xs
         } else {
-            debug_assert_eq!(files.tags_files().len(), 0);
-            to_move_ops(files, prefix)
+            debug_assert_eq!(paths.tags_paths().len(), 0);
+            to_move_ops(paths, prefix)
         }
     })
 }
 
-fn tag_to_split(tags_files: &TagsFiles) -> Option<Intern<Tag>> {
-    tags_files
+fn tag_to_split(tags_paths: &TagsPaths) -> Option<Intern<Tag>> {
+    tags_paths
         .iter()
-        .map(|(tag, tag_files)| (tag, tag_files.len()))
+        .map(|(tag, tag_paths)| (tag, tag_paths.len()))
         .max_by(|(tag, count), (other_tag, other_count)| {
             count
                 .cmp(other_count)
@@ -50,7 +50,7 @@ fn tag_to_split(tags_files: &TagsFiles) -> Option<Intern<Tag>> {
         .map(|(tag, _)| *tag)
 }
 
-fn to_move_ops(files: Partition, prefix: Prefix) -> Vec<MoveOp> {
+fn to_move_ops(paths: Partition, prefix: Prefix) -> Vec<MoveOp> {
     let prefix = {
         let separators = prefix
             .iter()
@@ -61,7 +61,7 @@ fn to_move_ops(files: Partition, prefix: Prefix) -> Vec<MoveOp> {
                 move |((tag_len, count), (next_len, next_count))| {
                     if count == next_count
                         && len + tag_len + INLINE_SEPARATOR.len_utf8() + next_len
-                            <= FILENAME_MAX_LEN
+                            <= PATH_PART_MAX_LEN
                     {
                         len += tag_len + INLINE_SEPARATOR.len_utf8();
                         INLINE_SEPARATOR
@@ -86,9 +86,9 @@ fn to_move_ops(files: Partition, prefix: Prefix) -> Vec<MoveOp> {
         )
     };
 
-    files
+    paths
         .finalize()
-        .map(|(file, mut inline_tags)| {
+        .map(|(path, mut inline_tags)| {
             let inline_tags = {
                 inline_tags.sort_unstable_by(|tag, other| {
                     tag.len()
@@ -99,13 +99,13 @@ fn to_move_ops(files: Partition, prefix: Prefix) -> Vec<MoveOp> {
                 let separators = inline_tags
                     .iter()
                     .map(|tag| tag.len())
-                    .chain([TAG_END.len_utf8() + file.name().len()])
+                    .chain([TAG_END.len_utf8() + path.name().len()])
                     .tuple_windows()
                     .map({
                         let mut len = 0;
                         move |(tag_len, next_len)| {
                             if len + tag_len + INLINE_SEPARATOR.len_utf8() + next_len
-                                <= FILENAME_MAX_LEN
+                                <= PATH_PART_MAX_LEN
                             {
                                 len += tag_len + INLINE_SEPARATOR.len_utf8();
                                 INLINE_SEPARATOR
@@ -126,14 +126,14 @@ fn to_move_ops(files: Partition, prefix: Prefix) -> Vec<MoveOp> {
             };
 
             (
-                format!("{}{}{TAG_END}{}", &prefix, inline_tags, file.name()).into(),
-                file,
+                format!("{}{}{TAG_END}{}", &prefix, inline_tags, path.name()).into(),
+                path,
             )
         })
-        .filter(|(to, file)| file.as_path() != to)
-        .map(|(to, file)| MoveOp {
+        .filter(|(to, path)| path.as_path() != to)
+        .map(|(to, path)| MoveOp {
             to,
-            from: file.as_path().into(),
+            from: path.as_path().into(),
         })
         .collect()
 }
@@ -148,54 +148,54 @@ mod partition {
     use rustc_hash::{FxHashMap, FxHashSet};
     use smallvec::SmallVec;
 
-    use crate::{Tag, TaggedFile};
+    use crate::{Tag, TaggedPath};
 
     #[derive(Debug)]
     pub struct Partition<'a> {
-        tags_files: TagsFiles<'a>,
-        files_tags: FilesTags<'a>,
-        done_files: DoneFiles<'a>,
+        tags_paths: TagsPaths<'a>,
+        paths_tags: PathsTags<'a>,
+        done_paths: DonePaths<'a>,
     }
 
-    pub type TagsFiles<'a> = FxHashMap<Intern<Tag>, FxHashSet<ByThinAddress<&'a TaggedFile>>>;
-    type FilesTags<'a> = FxHashMap<ByThinAddress<&'a TaggedFile>, FileTags>;
+    pub type TagsPaths<'a> = FxHashMap<Intern<Tag>, FxHashSet<ByThinAddress<&'a TaggedPath>>>;
+    type PathsTags<'a> = FxHashMap<ByThinAddress<&'a TaggedPath>, PathTags>;
 
     #[derive(Debug, Default)]
-    struct FileTags {
+    struct PathTags {
         unused_tags: FxHashSet<Intern<Tag>>,
         inline_tags: SmallVec<[Intern<Tag>; 1]>,
     }
 
-    type DoneFiles<'a> = Vec<(&'a TaggedFile, SmallVec<[Intern<Tag>; 1]>)>;
+    type DonePaths<'a> = Vec<(&'a TaggedPath, SmallVec<[Intern<Tag>; 1]>)>;
 
     impl<'a> Partition<'a> {
-        pub fn new(files: &'a [TaggedFile]) -> Self {
-            let files_tags: FilesTags = files
+        pub fn new(paths: &'a [TaggedPath]) -> Self {
+            let paths_tags: PathsTags = paths
                 .iter()
                 .map(ByThinAddress)
-                .filter(|file| !file.tags_is_empty()) // Files with no tags will never move.
-                .map(|file| {
+                .filter(|path| !path.tags_is_empty()) // Paths with no tags will never move.
+                .map(|path| {
                     (
-                        file,
-                        FileTags {
-                            unused_tags: file.tags().map(Intern::from_ref).collect(),
+                        path,
+                        PathTags {
+                            unused_tags: path.tags().map(Intern::from_ref).collect(),
                             inline_tags: Default::default(),
                         },
                     )
                 })
                 .collect();
 
-            let mut tags_files: TagsFiles = Default::default();
-            for (file, tags) in &files_tags {
+            let mut tags_paths: TagsPaths = Default::default();
+            for (path, tags) in &paths_tags {
                 for tag in &tags.unused_tags {
-                    tags_files.entry(*tag).or_default().insert(*file);
+                    tags_paths.entry(*tag).or_default().insert(*path);
                 }
             }
 
             let mut this = Self {
-                tags_files,
-                files_tags,
-                done_files: Default::default(),
+                tags_paths,
+                paths_tags,
+                done_paths: Default::default(),
             };
             this.extract_inline_tags();
 
@@ -206,12 +206,12 @@ mod partition {
 
         /// Return (with_tag, without_tag).
         pub fn partition(mut self, tag: Intern<Tag>) -> (Self, Self) {
-            let files = self.tags_files.remove(&tag).unwrap();
+            let paths = self.tags_paths.remove(&tag).unwrap();
 
-            let (mut with_tag, mut without_tag) = if files.len() > self.unused_len() / 2 {
-                self._partition_reverse(tag, files)
+            let (mut with_tag, mut without_tag) = if paths.len() > self.unused_len() / 2 {
+                self._partition_reverse(tag, paths)
             } else {
-                self._partition(tag, files)
+                self._partition(tag, paths)
             };
 
             with_tag.extract_inline_tags();
@@ -226,32 +226,32 @@ mod partition {
         fn _partition(
             self,
             tag: Intern<Tag>,
-            files: FxHashSet<ByThinAddress<&'a TaggedFile>>,
+            paths: FxHashSet<ByThinAddress<&'a TaggedPath>>,
         ) -> (Self, Self) {
             let mut with_tag = Self {
-                tags_files: Default::default(),
-                files_tags: Default::default(),
-                done_files: Default::default(),
+                tags_paths: Default::default(),
+                paths_tags: Default::default(),
+                done_paths: Default::default(),
             };
             let mut without_tag = self;
 
-            for file in files {
-                let mut file_tags = without_tag.files_tags.remove(&file).unwrap();
-                if file_tags.unused_tags.len() == 1 {
-                    debug_assert!(file_tags.unused_tags.contains(&tag));
-                    with_tag.done_files.push((file.0, file_tags.inline_tags));
+            for path in paths {
+                let mut path_tags = without_tag.paths_tags.remove(&path).unwrap();
+                if path_tags.unused_tags.len() == 1 {
+                    debug_assert!(path_tags.unused_tags.contains(&tag));
+                    with_tag.done_paths.push((path.0, path_tags.inline_tags));
                 } else {
-                    file_tags.unused_tags.remove(&tag);
-                    for tag in &file_tags.unused_tags {
-                        with_tag.tags_files.entry(*tag).or_default().insert(file);
-                        let tag_files = without_tag.tags_files.get_mut(tag).unwrap();
-                        if tag_files.len() == 1 {
-                            without_tag.tags_files.remove(tag);
+                    path_tags.unused_tags.remove(&tag);
+                    for tag in &path_tags.unused_tags {
+                        with_tag.tags_paths.entry(*tag).or_default().insert(path);
+                        let tag_paths = without_tag.tags_paths.get_mut(tag).unwrap();
+                        if tag_paths.len() == 1 {
+                            without_tag.tags_paths.remove(tag);
                         } else {
-                            tag_files.remove(&file);
+                            tag_paths.remove(&path);
                         }
                     }
-                    with_tag.files_tags.insert(file, file_tags);
+                    with_tag.paths_tags.insert(path, path_tags);
                 }
             }
 
@@ -261,64 +261,64 @@ mod partition {
         fn _partition_reverse(
             mut self,
             tag: Intern<Tag>,
-            files: FxHashSet<ByThinAddress<&'a TaggedFile>>,
+            paths: FxHashSet<ByThinAddress<&'a TaggedPath>>,
         ) -> (Self, Self) {
-            let files_without = self
-                .files_tags
+            let paths_without = self
+                .paths_tags
                 .par_iter()
-                .filter(|(_, file_tags)| !file_tags.unused_tags.contains(&tag))
-                .map(|(file, _)| file)
+                .filter(|(_, path_tags)| !path_tags.unused_tags.contains(&tag))
+                .map(|(path, _)| path)
                 .copied()
                 .collect::<Vec<_>>();
 
-            let mut done_files = DoneFiles::default();
-            for file in files {
-                let file_tags = self.files_tags.get_mut(&file).unwrap();
-                if file_tags.unused_tags.len() == 1 {
-                    debug_assert!(file_tags.unused_tags.contains(&tag));
-                    done_files.push((file.0, self.files_tags.remove(&file).unwrap().inline_tags));
+            let mut done_paths = DonePaths::default();
+            for path in paths {
+                let path_tags = self.paths_tags.get_mut(&path).unwrap();
+                if path_tags.unused_tags.len() == 1 {
+                    debug_assert!(path_tags.unused_tags.contains(&tag));
+                    done_paths.push((path.0, self.paths_tags.remove(&path).unwrap().inline_tags));
                 } else {
-                    file_tags.unused_tags.remove(&tag);
+                    path_tags.unused_tags.remove(&tag);
                 }
             }
 
             let mut without_tag = Self {
-                tags_files: Default::default(),
-                files_tags: Default::default(),
-                done_files: replace(&mut self.done_files, done_files),
+                tags_paths: Default::default(),
+                paths_tags: Default::default(),
+                done_paths: replace(&mut self.done_paths, done_paths),
             };
             let mut with_tag = self;
 
-            for file in files_without {
-                let file_tags = with_tag.files_tags.remove(&file).unwrap();
-                for tag in &file_tags.unused_tags {
-                    if let Some(tag_files) = with_tag.tags_files.get_mut(tag) {
-                        without_tag.tags_files.entry(*tag).or_default().insert(file);
-                        if tag_files.len() == 1 {
-                            with_tag.tags_files.remove(tag);
+            for path in paths_without {
+                let path_tags = with_tag.paths_tags.remove(&path).unwrap();
+                for tag in &path_tags.unused_tags {
+                    if let Some(tag_paths) = with_tag.tags_paths.get_mut(tag) {
+                        without_tag.tags_paths.entry(*tag).or_default().insert(path);
+                        if tag_paths.len() == 1 {
+                            with_tag.tags_paths.remove(tag);
                         } else {
-                            tag_files.remove(&file);
+                            tag_paths.remove(&path);
                         }
                     }
                 }
-                without_tag.files_tags.insert(file, file_tags);
+                without_tag.paths_tags.insert(path, path_tags);
             }
 
             (with_tag, without_tag)
         }
 
         fn extract_inline_tags(&mut self) {
-            self.tags_files.retain(|tag, files| {
-                if files.len() == 1 {
-                    let file = files.iter().next().unwrap();
-                    let file_tags = self.files_tags.get_mut(file).unwrap();
-                    file_tags.inline_tags.push(*tag);
-                    if file_tags.unused_tags.len() == 1 {
-                        debug_assert!(file_tags.unused_tags.contains(tag));
-                        self.done_files
-                            .push((file.0, self.files_tags.remove(file).unwrap().inline_tags));
+            self.tags_paths.retain(|tag, paths| {
+                if paths.len() == 1 {
+                    let path = paths.iter().next().unwrap();
+                    let path_tags = self.paths_tags.get_mut(path).unwrap();
+                    path_tags.inline_tags.push(*tag);
+                    if path_tags.unused_tags.len() == 1 {
+                        debug_assert!(path_tags.unused_tags.contains(tag));
+                        self.done_paths
+                            .push((path.0, self.paths_tags.remove(path).unwrap().inline_tags));
                     } else {
-                        file_tags.unused_tags.remove(tag);
+                        path_tags.unused_tags.remove(tag);
                     }
                     false
                 } else {
@@ -329,31 +329,31 @@ mod partition {
 
         fn validate(&self) {
             debug_assert_eq!(
-                self.files_tags.len(),
-                self.tags_files.values().flatten().unique().count()
+                self.paths_tags.len(),
+                self.tags_paths.values().flatten().unique().count()
             );
             debug_assert!(!self
-                .done_files
+                .done_paths
                 .iter()
-                .any(|(file, _)| self.files_tags.contains_key(&ByThinAddress(*file))))
+                .any(|(path, _)| self.paths_tags.contains_key(&ByThinAddress(*path))))
         }
 
         pub fn len(&self) -> usize {
-            self.files_tags.len() + self.done_files.len()
+            self.paths_tags.len() + self.done_paths.len()
         }
 
         fn unused_len(&self) -> usize {
-            self.files_tags.len()
+            self.paths_tags.len()
         }
 
-        pub fn tags_files(&self) -> &TagsFiles {
-            &self.tags_files
+        pub fn tags_paths(&self) -> &TagsPaths {
+            &self.tags_paths
         }
 
         pub fn finalize(
             self,
-        ) -> impl Iterator<Item = (&'a TaggedFile, SmallVec<[Intern<Tag>; 1]>)> {
-            self.done_files.into_iter()
+        ) -> impl Iterator<Item = (&'a TaggedPath, SmallVec<[Intern<Tag>; 1]>)> {
+            self.done_paths.into_iter()
         }
     }
 }
