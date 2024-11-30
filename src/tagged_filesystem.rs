@@ -2218,19 +2218,38 @@ mod tests {
             let filesystem = tagged_filesystem();
             const BREADTH: usize = 200;
             const DEPTH: usize = 50;
-            let paths = (0..BREADTH)
+            let names = (0..(BREADTH * 2))
+                .map(|i| Name::new(i.to_string()).unwrap())
+                .collect_vec();
+            let names_tags = (0..BREADTH)
                 .flat_map(|n| {
                     let x = n * DEPTH;
-                    let prefix = PathBuf::from((x..x + DEPTH).map(|x| format!("{x:04}")).join("-"));
-                    [prefix.join("_bar"), prefix.join("_foo")]
+                    let tags = (x..x + DEPTH)
+                        .map(|x| Tag::new(format!("{x:04}")).unwrap())
+                        .collect_vec();
+                    [tags.clone(), tags]
                 })
                 .collect_vec();
-            for path in &paths {
-                make_file_and_parent(path);
+            debug_assert_eq!(names.len(), names_tags.len());
+            let paths = names
+                .iter()
+                .zip(&names_tags)
+                .map(|(name, tags)| {
+                    PathBuf::from(tags.iter().map(|tag| tag.to_string()).join("-"))
+                        .join(format!("_{name}"))
+                })
+                .collect_vec();
+            for ((name, tags), path) in names.iter().zip(&names_tags).zip(&paths) {
+                File::create(filesystem.root.file(name)).unwrap();
+                create_dir_all(filesystem.root.program_tags(name)).unwrap();
+                for tag in tags {
+                    File::create(filesystem.root.tag(name, tag)).unwrap();
+                }
+                make_file_and_parent(filesystem.root.join(path));
             }
 
             filesystem.build().unwrap();
-            assert_eq!(list_files(filesystem.root), paths)
+            assert_eq!(list_tagged_paths(filesystem.root), paths)
         })
     }
 
