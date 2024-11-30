@@ -1173,19 +1173,7 @@ mod tests {
     #[test]
     fn touch_works_in_subdir_of_root() {
         with_tempdir(|| {
-            let filesystem = tagged_filesystem();
-            filesystem
-                .touch(
-                    [Tag::new("foo".to_owned()).unwrap()],
-                    Name::new("bar".to_owned()).unwrap(),
-                )
-                .unwrap();
-            filesystem
-                .touch(
-                    [Tag::new("foo".to_owned()).unwrap()],
-                    Name::new("baz".to_owned()).unwrap(),
-                )
-                .unwrap();
+            let _ = tagged_filesystem_with(["foo-_bar", "foo-_baz"]);
 
             set_current_dir("foo").unwrap();
             let filesystem = TaggedFilesystemBuilder::new(current_dir().unwrap())
@@ -1232,13 +1220,7 @@ mod tests {
     #[test]
     fn touch_errors_if_file_with_name_exists() {
         with_tempdir(|| {
-            let filesystem = tagged_filesystem();
-            filesystem
-                .touch(
-                    [Tag::new("foo".to_owned()).unwrap()],
-                    Name::new("bar".to_owned()).unwrap(),
-                )
-                .unwrap();
+            let filesystem = tagged_filesystem_with(["foo-_bar"]);
             assert!(filesystem
                 .touch(
                     [Tag::new("baz".to_owned()).unwrap()],
@@ -1255,13 +1237,7 @@ mod tests {
     #[test]
     fn touch_errors_if_dir_with_name_exists() {
         with_tempdir(|| {
-            let filesystem = tagged_filesystem();
-            filesystem
-                .mkdir(
-                    [Tag::new("foo".to_owned()).unwrap()],
-                    Name::new("bar".to_owned()).unwrap(),
-                )
-                .unwrap();
+            let filesystem = tagged_filesystem_with(["foo-_bar"]);
             assert!(filesystem
                 .touch(
                     [Tag::new("baz".to_owned()).unwrap()],
@@ -1394,13 +1370,7 @@ mod tests {
     #[test]
     fn mkdir_errors_if_file_with_name_exists() {
         with_tempdir(|| {
-            let filesystem = tagged_filesystem();
-            filesystem
-                .touch(
-                    [Tag::new("foo".to_owned()).unwrap()],
-                    Name::new("bar".to_owned()).unwrap(),
-                )
-                .unwrap();
+            let filesystem = tagged_filesystem_with(["foo-_bar"]);
             assert!(filesystem
                 .mkdir(
                     [Tag::new("baz".to_owned()).unwrap()],
@@ -1475,11 +1445,8 @@ mod tests {
     #[test]
     fn rm_removes_file_if_it_exists() {
         with_tempdir(|| {
-            let filesystem = tagged_filesystem();
-            let name = Name::new("foo".to_owned()).unwrap();
-            filesystem.touch([], name.clone()).unwrap();
-
-            assert!(filesystem.rm(name).is_ok());
+            let filesystem = tagged_filesystem_with(["_foo"]);
+            assert!(filesystem.rm(Name::new("foo".to_owned()).unwrap()).is_ok());
             assert_eq!(
                 list_files(&filesystem.root),
                 [".tag/files", ".tag/tags"].map(PathBuf::from)
@@ -1561,13 +1528,14 @@ mod tests {
     #[test]
     fn rename_renames_file_and_tagged_path_if_file_exists_and_no_file_with_new_name() {
         with_tempdir(|| {
-            let filesystem = tagged_filesystem();
-            let name = Name::new("bar".to_owned()).unwrap();
-            let new_name = Name::new("baz".to_owned()).unwrap();
-            let tag = Tag::new("foo".to_owned()).unwrap();
-            filesystem.touch([tag], name.clone()).unwrap();
+            let filesystem = tagged_filesystem_with(["foo-_bar"]);
             assert_eq!(
-                filesystem.rename(name, new_name.clone()).unwrap(),
+                filesystem
+                    .rename(
+                        Name::new("bar".to_owned()).unwrap(),
+                        Name::new("baz".to_owned()).unwrap()
+                    )
+                    .unwrap(),
                 PathBuf::from("foo-_baz")
             );
             assert_eq!(
@@ -1576,25 +1544,20 @@ mod tests {
             );
             assert_eq!(
                 read_link(filesystem.root.as_path().join("foo-_baz")).unwrap(),
-                filesystem.root.file(new_name)
+                filesystem.root.file(Name::new("baz".to_owned()).unwrap())
             );
         })
     }
 
     #[proptest]
-    fn rename_errors_if_names_are_same(files: TaggedPaths, file: TaggedPath) {
+    fn rename_errors_if_names_are_same(paths: TaggedPaths, path: TaggedPath) {
         let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(files);
-            filesystem
-                .touch(
-                    file.tags().map(|tag| tag.to_owned()),
-                    file.name().to_owned(),
-                )
-                .unwrap();
+            let filesystem = tagged_filesystem_with(paths.iter().chain([&path]));
+
             let expected = list_files(&filesystem.root);
 
             assert!(filesystem
-                .rename(file.name().to_owned(), file.name().to_owned())
+                .rename(path.name().to_owned(), path.name().to_owned())
                 .is_err());
             let actual = list_files(&filesystem.root);
 
@@ -1624,19 +1587,7 @@ mod tests {
     #[test]
     fn rename_errors_if_file_exists_with_new_name() {
         with_tempdir(|| {
-            let filesystem = tagged_filesystem();
-            filesystem
-                .touch(
-                    [Tag::new("fiz".to_owned()).unwrap()],
-                    Name::new("bar".to_owned()).unwrap(),
-                )
-                .unwrap();
-            filesystem
-                .touch(
-                    [Tag::new("foo".to_owned()).unwrap()],
-                    Name::new("baz".to_owned()).unwrap(),
-                )
-                .unwrap();
+            let filesystem = tagged_filesystem_with(["fiz-_bar", "foo-_baz"]);
             assert!(filesystem
                 .rename(
                     Name::new("bar".to_owned()).unwrap(),
@@ -1976,6 +1927,7 @@ mod tests {
     fn build_removes_tagged_paths_for_missing_files(paths: TaggedPaths, path: TaggedPath) {
         let (actual, expected) = with_tempdir(|| {
             let filesystem = tagged_filesystem_with(paths);
+
             let expected = list_files(&filesystem.root);
 
             filesystem
@@ -1998,13 +1950,8 @@ mod tests {
     #[proptest(cases = 20)]
     fn build_adds_tagged_paths_for_files_without(paths: TaggedPaths, path: TaggedPath) {
         let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths);
-            filesystem
-                .touch(
-                    path.tags().map(|tag| tag.to_owned()),
-                    path.name().to_owned(),
-                )
-                .unwrap();
+            let filesystem = tagged_filesystem_with(paths.iter().chain([&path]));
+
             let expected = list_files(&filesystem.root);
 
             remove_file(
@@ -2034,17 +1981,11 @@ mod tests {
         .unwrap();
 
         let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths);
+            let filesystem = tagged_filesystem_with(paths.iter().chain([&path]));
 
-            filesystem
-                .touch(
-                    path.tags().map(|tag| tag.to_owned()),
-                    path.name().to_owned(),
-                )
-                .unwrap();
             let expected = list_files(&filesystem.root);
-            filesystem.rm(path.name().to_owned()).unwrap();
 
+            filesystem.rm(path.name().to_owned()).unwrap();
             filesystem
                 .touch(
                     path.tags().map(|tag| tag.to_owned()).chain([tag.clone()]),
@@ -2071,16 +2012,16 @@ mod tests {
 
         let (actual, expected) = with_tempdir(|| {
             let filesystem = tagged_filesystem_with(paths);
-
             filesystem
                 .touch(
                     path.tags().map(|tag| tag.to_owned()).chain([tag.clone()]),
                     path.name().to_owned(),
                 )
                 .unwrap();
-            let expected = list_files(&filesystem.root);
-            filesystem.rm(path.name().to_owned()).unwrap();
 
+            let expected = list_files(&filesystem.root);
+
+            filesystem.rm(path.name().to_owned()).unwrap();
             filesystem
                 .touch(
                     path.tags().map(|tag| tag.to_owned()),
