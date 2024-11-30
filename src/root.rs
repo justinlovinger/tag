@@ -55,6 +55,13 @@ impl Root {
         &self.path
     }
 
+    pub fn join<P>(&self, path: P) -> PathBuf
+    where
+        P: AsRef<Path>,
+    {
+        self.as_path().join(path)
+    }
+
     pub fn metadata(&self) -> &Path {
         &self.metadata
     }

@@ -312,7 +312,7 @@ impl TaggedFilesystem {
             Op::DeleteDirectoryIfEmpty(_) => true,
         }))?;
 
-        let to_path = self.root.as_path().join(match to_path {
+        let to_path = self.root.join(match to_path {
             Some(to_path) => to_path,
             None => tagged_path_buf,
         });
@@ -817,14 +817,12 @@ impl TaggedFilesystem {
 
     fn canonicalize(&self, op: Op) -> Op {
         match op {
-            Op::EnsureDirectory(path) => Op::EnsureDirectory(self.root.as_path().join(path)),
+            Op::EnsureDirectory(path) => Op::EnsureDirectory(self.root.join(path)),
             Op::Move(MoveOp { from, to }) => Op::Move(MoveOp {
-                from: self.root.as_path().join(from),
-                to: self.root.as_path().join(to),
+                from: self.root.join(from),
+                to: self.root.join(to),
             }),
-            Op::DeleteDirectoryIfEmpty(path) => {
-                Op::DeleteDirectoryIfEmpty(self.root.as_path().join(path))
-            }
+            Op::DeleteDirectoryIfEmpty(path) => Op::DeleteDirectoryIfEmpty(self.root.join(path)),
         }
     }
 
@@ -1164,7 +1162,7 @@ mod tests {
                 "".as_bytes()
             );
             assert_eq!(
-                read_link(filesystem.root.as_path().join("foo-_bar")).unwrap(),
+                read_link(filesystem.root.join("foo-_bar")).unwrap(),
                 filesystem.root.file(name)
             );
         })
@@ -1211,7 +1209,7 @@ mod tests {
                 "".as_bytes()
             );
             assert_eq!(
-                read_link(filesystem.root.as_path().join("foo/_biz")).unwrap(),
+                read_link(filesystem.root.join("foo/_biz")).unwrap(),
                 filesystem.root.file(name)
             );
         })
@@ -1305,7 +1303,7 @@ mod tests {
                 .next()
                 .is_none());
             assert_eq!(
-                read_link(filesystem.root.as_path().join("foo-_bar")).unwrap(),
+                read_link(filesystem.root.join("foo-_bar")).unwrap(),
                 filesystem.root.file(name)
             );
         })
@@ -1361,7 +1359,7 @@ mod tests {
                 .next()
                 .is_none());
             assert_eq!(
-                read_link(filesystem.root.as_path().join("foo/_biz")).unwrap(),
+                read_link(filesystem.root.join("foo/_biz")).unwrap(),
                 filesystem.root.file(name)
             );
         })
@@ -1543,7 +1541,7 @@ mod tests {
                 [".tag/files/baz", ".tag/tags/baz/tag/foo", "foo-_baz"].map(PathBuf::from)
             );
             assert_eq!(
-                read_link(filesystem.root.as_path().join("foo-_baz")).unwrap(),
+                read_link(filesystem.root.join("foo-_baz")).unwrap(),
                 filesystem.root.file(Name::new("baz".to_owned()).unwrap())
             );
         })
@@ -1955,7 +1953,7 @@ mod tests {
             let expected = list_files(&filesystem.root);
 
             remove_file(
-                filesystem.root.as_path().join(
+                filesystem.root.join(
                     filesystem
                         .filtered_tagged_paths(move |x| x.name() == path.name())
                         .next()
@@ -2107,13 +2105,13 @@ mod tests {
     fn build_ignores_untagged_paths() {
         with_tempdir(|| {
             let filesystem = tagged_filesystem_with(["a-_foo"]);
-            create_dir(filesystem.root.as_path().join("a")).unwrap();
+            create_dir(filesystem.root.join("a")).unwrap();
             rename(
-                filesystem.root.as_path().join("a-_foo"),
-                filesystem.root.as_path().join("a/_foo"),
+                filesystem.root.join("a-_foo"),
+                filesystem.root.join("a/_foo"),
             )
             .unwrap();
-            File::create(filesystem.root.as_path().join("a/not-tagged")).unwrap();
+            File::create(filesystem.root.join("a/not-tagged")).unwrap();
             filesystem.build().unwrap();
             assert_eq!(
                 list_files(filesystem.root),
