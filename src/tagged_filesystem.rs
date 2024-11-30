@@ -2100,7 +2100,7 @@ mod tests {
     #[proptest(cases = 20)]
     fn build_deletes_duplicate_tagged_paths(paths: TaggedPaths, path: TaggedPath) {
         let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths.0.iter().chain([&path]));
+            let filesystem = tagged_filesystem_with(paths.iter().chain([&path]));
             let expected = list_files(&filesystem.root);
 
             symlink_file(
@@ -2192,7 +2192,7 @@ mod tests {
         #[strategy(
             TaggedPaths::arbitrary()
                 .prop_flat_map(|paths| (
-                    vec(TaggedPaths::arbitrary(), paths.0.len()),
+                    vec(TaggedPaths::arbitrary(), paths.len()),
                     Just(paths)
                 ))
                 .prop_map(|(x, y)| (y, x))

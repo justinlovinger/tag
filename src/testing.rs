@@ -101,12 +101,31 @@ mod tagged_filesystem {
     #[derive(Debug, Clone)]
     pub struct TaggedPaths(pub Vec<TaggedPath>);
 
+    impl TaggedPaths {
+        pub fn iter(&self) -> std::slice::Iter<'_, TaggedPath> {
+            self.0.iter()
+        }
+
+        pub fn len(&self) -> usize {
+            self.0.len()
+        }
+    }
+
     impl IntoIterator for TaggedPaths {
         type Item = TaggedPath;
         type IntoIter = <Vec<TaggedPath> as IntoIterator>::IntoIter;
 
         fn into_iter(self) -> Self::IntoIter {
             self.0.into_iter()
+        }
+    }
+
+    impl<'a> IntoIterator for &'a TaggedPaths {
+        type Item = &'a TaggedPath;
+        type IntoIter = <&'a [TaggedPath] as IntoIterator>::IntoIter;
+
+        fn into_iter(self) -> Self::IntoIter {
+            self.iter()
         }
     }
 
