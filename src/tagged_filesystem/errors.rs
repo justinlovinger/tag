@@ -43,14 +43,6 @@ impl LacksTagError {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("{0}")]
-pub enum PathError {
-    NonUniqueTag(#[from] NonUniqueTagError),
-    New(#[from] NewError),
-    Filesystem(#[from] std::io::Error),
-}
-
-#[derive(Debug, thiserror::Error)]
 #[error("Tag is not unique")]
 pub struct NonUniqueTagError;
 
