@@ -230,7 +230,7 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Del { tag, files }) => {
                 print_paths(filesystem.del(tag, files.into_iter().collect())?)?
             }
-            Some(Commands::Mod { add, del, files }) => print_paths(filesystem.modify(
+            Some(Commands::Mod { add, del, files }) => print_paths(filesystem.r#mod(
                 add.into_iter().collect(),
                 del.into_iter().collect(),
                 files.into_iter().collect(),

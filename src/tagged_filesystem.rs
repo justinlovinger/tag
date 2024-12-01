@@ -402,14 +402,14 @@ impl TaggedFilesystem {
     }
 
     pub fn add(&self, tag: Tag, paths: FxHashSet<TaggedPath>) -> Result<Vec<PathBuf>, ModError> {
-        self.modify([tag].into_iter().collect(), FxHashSet::default(), paths)
+        self.r#mod([tag].into_iter().collect(), FxHashSet::default(), paths)
     }
 
     pub fn del(&self, tag: Tag, paths: FxHashSet<TaggedPath>) -> Result<Vec<PathBuf>, ModError> {
-        self.modify(FxHashSet::default(), [tag].into_iter().collect(), paths)
+        self.r#mod(FxHashSet::default(), [tag].into_iter().collect(), paths)
     }
 
-    pub fn modify(
+    pub fn r#mod(
         &self,
         add: FxHashSet<Tag>,
         del: FxHashSet<Tag>,
@@ -1527,7 +1527,7 @@ mod tests {
             let path = TaggedPath::new("foo-_baz".to_owned()).unwrap();
             let filesystem = tagged_filesystem_with([&path]);
             filesystem
-                .modify(
+                .r#mod(
                     [tag("bar")].into_iter().collect(),
                     [].into_iter().collect(),
                     [path].into_iter().collect(),
@@ -1552,7 +1552,7 @@ mod tests {
             let path = TaggedPath::new("foo-_baz".to_owned()).unwrap();
             let filesystem = tagged_filesystem_with([&path]);
             filesystem
-                .modify(
+                .r#mod(
                     [].into_iter().collect(),
                     [tag("foo")].into_iter().collect(),
                     [path].into_iter().collect(),
@@ -1571,7 +1571,7 @@ mod tests {
             let path = TaggedPath::new("foo-_baz".to_owned()).unwrap();
             let filesystem = tagged_filesystem_with([&path]);
             filesystem
-                .modify(
+                .r#mod(
                     [tag("bar")].into_iter().collect(),
                     [tag("foo")].into_iter().collect(),
                     [path].into_iter().collect(),
@@ -1590,7 +1590,7 @@ mod tests {
             let paths = ["foo/_bar", "foo/_foo"];
             let filesystem = tagged_filesystem_with(paths);
             filesystem
-                .modify(
+                .r#mod(
                     [tag("bar")].into_iter().collect(),
                     [tag("foo")].into_iter().collect(),
                     paths
@@ -1620,7 +1620,7 @@ mod tests {
             let path = TaggedPath::new("foo-_baz".to_owned()).unwrap();
             let filesystem = tagged_filesystem_with([&path]);
             filesystem
-                .modify(
+                .r#mod(
                     [tag("bar"), tag("baz")].into_iter().collect(),
                     [tag("foo")].into_iter().collect(),
                     [path].into_iter().collect(),
@@ -1644,7 +1644,7 @@ mod tests {
         with_tempdir(|| {
             let filesystem = tagged_filesystem_with(["foo-baz-_baz"]);
             filesystem
-                .modify(
+                .r#mod(
                     [tag("bar")].into_iter().collect(),
                     [tag("foo"), tag("baz")].into_iter().collect(),
                     filesystem
@@ -1668,7 +1668,7 @@ mod tests {
             let expected = list_files(&filesystem.root);
 
             filesystem
-                .modify(
+                .r#mod(
                     [].into_iter().collect(),
                     [].into_iter().collect(),
                     filesystem
@@ -1702,7 +1702,7 @@ mod tests {
                 )
                 .unwrap();
             filesystem
-                .modify(
+                .r#mod(
                     [tag_to_add].into_iter().collect(),
                     [tag_to_del].into_iter().collect(),
                     filesystem
@@ -1727,7 +1727,7 @@ mod tests {
             let path = TaggedPath::new("foo-_bar".to_owned()).unwrap();
             let filesystem = tagged_filesystem_with([&path]);
             assert!(filesystem
-                .modify(
+                .r#mod(
                     [tag("foo")].into_iter().collect(),
                     [].into_iter().collect(),
                     [path].into_iter().collect()
@@ -1742,7 +1742,7 @@ mod tests {
             let path = TaggedPath::new("_bar".to_owned()).unwrap();
             let filesystem = tagged_filesystem_with([&path]);
             assert!(filesystem
-                .modify(
+                .r#mod(
                     [].into_iter().collect(),
                     [tag("foo")].into_iter().collect(),
                     [path].into_iter().collect()
@@ -1756,7 +1756,7 @@ mod tests {
         with_tempdir(|| {
             let filesystem = tagged_filesystem();
             assert!(filesystem
-                .modify(
+                .r#mod(
                     [tag("bar")].into_iter().collect(),
                     [tag("foo")].into_iter().collect(),
                     [TaggedPath::new("foo-_baz".to_owned()).unwrap()]
