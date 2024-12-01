@@ -1031,12 +1031,7 @@ mod tests {
     fn init_initializes_a_nested_tagged_filesystem_from_files_dir() {
         with_tempdir(|| {
             let filesystem = TaggedFilesystem::init().unwrap();
-            filesystem
-                .mkdir(
-                    [Tag::new("foo".to_owned()).unwrap()],
-                    Name::new("bar".to_owned()).unwrap(),
-                )
-                .unwrap();
+            filesystem.mkdir([tag("foo")], name("bar")).unwrap();
             set_current_dir(".tag/files/bar").unwrap();
             assert!(TaggedFilesystem::init().is_ok());
             assert_eq!(
@@ -1057,12 +1052,7 @@ mod tests {
     fn init_initializes_a_nested_tagged_filesystem_from_tagged_path() {
         with_tempdir(|| {
             let filesystem = TaggedFilesystem::init().unwrap();
-            filesystem
-                .mkdir(
-                    [Tag::new("foo".to_owned()).unwrap()],
-                    Name::new("bar".to_owned()).unwrap(),
-                )
-                .unwrap();
+            filesystem.mkdir([tag("foo")], name("bar")).unwrap();
             set_current_dir("foo-_bar").unwrap();
             assert!(TaggedFilesystem::init().is_ok());
             assert_eq!(
@@ -1143,10 +1133,8 @@ mod tests {
     fn touch_creates_an_empty_file_with_metadata_and_a_link_if_name_is_unique() {
         with_tempdir(|| {
             let filesystem = tagged_filesystem();
-            let name = Name::new("bar".to_owned()).unwrap();
-            let tag = Tag::new("foo".to_owned()).unwrap();
             assert_eq!(
-                filesystem.touch([tag], name.clone()).unwrap(),
+                filesystem.touch([tag("foo")], name("bar")).unwrap(),
                 PathBuf::from("foo-_bar")
             );
             assert_eq!(
@@ -1154,7 +1142,7 @@ mod tests {
                 [".tag/files/bar", ".tag/tags/bar/tag/foo", "foo-_bar"].map(PathBuf::from)
             );
             assert_eq!(
-                File::open(filesystem.root.file(&name))
+                File::open(filesystem.root.file(name("bar")))
                     .unwrap()
                     .bytes()
                     .map(|x| x.unwrap())
@@ -1163,7 +1151,7 @@ mod tests {
             );
             assert_eq!(
                 read_link(filesystem.root.join("foo-_bar")).unwrap(),
-                filesystem.root.file(name)
+                filesystem.root.file(name("bar"))
             );
         })
     }
@@ -1179,10 +1167,8 @@ mod tests {
                 .unwrap()
                 .unwrap();
 
-            let name = Name::new("biz".to_owned()).unwrap();
-            let tag = Tag::new("foo".to_owned()).unwrap();
             assert_eq!(
-                filesystem.touch([tag], name.clone()).unwrap(),
+                filesystem.touch([tag("foo")], name("biz")).unwrap(),
                 PathBuf::from("_biz")
             );
             assert_eq!(
@@ -1201,7 +1187,7 @@ mod tests {
                 .map(PathBuf::from)
             );
             assert_eq!(
-                File::open(filesystem.root.file(&name))
+                File::open(filesystem.root.file(name("biz")))
                     .unwrap()
                     .bytes()
                     .map(|x| x.unwrap())
@@ -1210,7 +1196,7 @@ mod tests {
             );
             assert_eq!(
                 read_link(filesystem.root.join("foo/_biz")).unwrap(),
-                filesystem.root.file(name)
+                filesystem.root.file(name("biz"))
             );
         })
     }
@@ -1219,12 +1205,7 @@ mod tests {
     fn touch_errors_if_file_with_name_exists() {
         with_tempdir(|| {
             let filesystem = tagged_filesystem_with(["foo-_bar"]);
-            assert!(filesystem
-                .touch(
-                    [Tag::new("baz".to_owned()).unwrap()],
-                    Name::new("bar".to_owned()).unwrap()
-                )
-                .is_err());
+            assert!(filesystem.touch([tag("baz")], name("bar")).is_err());
             assert_eq!(
                 list_files(&filesystem.root),
                 [".tag/files/bar", ".tag/tags/bar/tag/foo", "foo-_bar"].map(PathBuf::from)
@@ -1236,12 +1217,7 @@ mod tests {
     fn touch_errors_if_dir_with_name_exists() {
         with_tempdir(|| {
             let filesystem = tagged_filesystem_with(["foo-_bar"]);
-            assert!(filesystem
-                .touch(
-                    [Tag::new("baz".to_owned()).unwrap()],
-                    Name::new("bar".to_owned()).unwrap()
-                )
-                .is_err());
+            assert!(filesystem.touch([tag("baz")], name("bar")).is_err());
             assert_eq!(
                 list_files(&filesystem.root),
                 [".tag/files/bar", ".tag/tags/bar/tag/foo", "foo-_bar"].map(PathBuf::from)
@@ -1253,9 +1229,8 @@ mod tests {
     fn touch_errors_if_metadata_exists_for_file() {
         with_tempdir(|| {
             let filesystem = tagged_filesystem();
-            let name = Name::new("bar".to_owned()).unwrap();
-            create_dir(filesystem.root.file_tags(&name)).unwrap();
-            assert!(filesystem.touch([], name).is_err());
+            create_dir(filesystem.root.file_tags(name("bar"))).unwrap();
+            assert!(filesystem.touch([], name("bar")).is_err());
             assert_eq!(
                 list_files(&filesystem.root),
                 [".tag/files", ".tag/tags/bar"].map(PathBuf::from)
@@ -1268,13 +1243,7 @@ mod tests {
         with_tempdir(|| {
             let filesystem = tagged_filesystem();
             assert!(filesystem
-                .touch(
-                    [
-                        Tag::new("foo".to_owned()).unwrap(),
-                        Tag::new("foo".to_owned()).unwrap()
-                    ],
-                    Name::new("bar".to_owned()).unwrap()
-                )
+                .touch([tag("foo"), tag("foo")], name("bar"))
                 .is_err());
             assert_eq!(
                 list_files(&filesystem.root),
@@ -1287,24 +1256,22 @@ mod tests {
     fn mkdir_creates_an_empty_directory_with_metadata_and_a_link_if_name_is_unique() {
         with_tempdir(|| {
             let filesystem = tagged_filesystem();
-            let name = Name::new("bar".to_owned()).unwrap();
-            let tag = Tag::new("foo".to_owned()).unwrap();
             assert_eq!(
-                filesystem.mkdir([tag], name.clone()).unwrap(),
+                filesystem.mkdir([tag("foo")], name("bar")).unwrap(),
                 PathBuf::from("foo-_bar")
             );
             assert_eq!(
                 list_files(&filesystem.root),
                 [".tag/files/bar", ".tag/tags/bar/tag/foo", "foo-_bar"].map(PathBuf::from)
             );
-            assert!(filesystem.root.file(&name).is_dir());
-            assert!(std::fs::read_dir(filesystem.root.file(&name))
+            assert!(filesystem.root.file(name("bar")).is_dir());
+            assert!(std::fs::read_dir(filesystem.root.file(name("bar")))
                 .unwrap()
                 .next()
                 .is_none());
             assert_eq!(
                 read_link(filesystem.root.join("foo-_bar")).unwrap(),
-                filesystem.root.file(name)
+                filesystem.root.file(name("bar"))
             );
         })
     }
@@ -1313,18 +1280,8 @@ mod tests {
     fn mkdir_works_in_subdir_of_root() {
         with_tempdir(|| {
             let filesystem = tagged_filesystem();
-            filesystem
-                .mkdir(
-                    [Tag::new("foo".to_owned()).unwrap()],
-                    Name::new("bar".to_owned()).unwrap(),
-                )
-                .unwrap();
-            filesystem
-                .mkdir(
-                    [Tag::new("foo".to_owned()).unwrap()],
-                    Name::new("baz".to_owned()).unwrap(),
-                )
-                .unwrap();
+            filesystem.mkdir([tag("foo")], name("bar")).unwrap();
+            filesystem.mkdir([tag("foo")], name("baz")).unwrap();
 
             set_current_dir("foo").unwrap();
             let filesystem = TaggedFilesystemBuilder::new(current_dir().unwrap())
@@ -1332,10 +1289,8 @@ mod tests {
                 .unwrap()
                 .unwrap();
 
-            let name = Name::new("biz".to_owned()).unwrap();
-            let tag = Tag::new("foo".to_owned()).unwrap();
             assert_eq!(
-                filesystem.mkdir([tag], name.clone()).unwrap(),
+                filesystem.mkdir([tag("foo")], name("biz")).unwrap(),
                 PathBuf::from("_biz")
             );
             assert_eq!(
@@ -1353,14 +1308,14 @@ mod tests {
                 ]
                 .map(PathBuf::from)
             );
-            assert!(filesystem.root.file(&name).is_dir());
-            assert!(std::fs::read_dir(filesystem.root.file(&name))
+            assert!(filesystem.root.file(name("biz")).is_dir());
+            assert!(std::fs::read_dir(filesystem.root.file(name("biz")))
                 .unwrap()
                 .next()
                 .is_none());
             assert_eq!(
                 read_link(filesystem.root.join("foo/_biz")).unwrap(),
-                filesystem.root.file(name)
+                filesystem.root.file(name("biz"))
             );
         })
     }
@@ -1369,12 +1324,7 @@ mod tests {
     fn mkdir_errors_if_file_with_name_exists() {
         with_tempdir(|| {
             let filesystem = tagged_filesystem_with(["foo-_bar"]);
-            assert!(filesystem
-                .mkdir(
-                    [Tag::new("baz".to_owned()).unwrap()],
-                    Name::new("bar".to_owned()).unwrap()
-                )
-                .is_err());
+            assert!(filesystem.mkdir([tag("baz")], name("bar")).is_err());
             assert_eq!(
                 list_files(&filesystem.root),
                 [".tag/files/bar", ".tag/tags/bar/tag/foo", "foo-_bar"].map(PathBuf::from)
@@ -1386,18 +1336,8 @@ mod tests {
     fn mkdir_errors_if_dir_with_name_exists() {
         with_tempdir(|| {
             let filesystem = tagged_filesystem();
-            filesystem
-                .mkdir(
-                    [Tag::new("foo".to_owned()).unwrap()],
-                    Name::new("bar".to_owned()).unwrap(),
-                )
-                .unwrap();
-            assert!(filesystem
-                .mkdir(
-                    [Tag::new("baz".to_owned()).unwrap()],
-                    Name::new("bar".to_owned()).unwrap()
-                )
-                .is_err());
+            filesystem.mkdir([tag("foo")], name("bar")).unwrap();
+            assert!(filesystem.mkdir([tag("baz")], name("bar")).is_err());
             assert_eq!(
                 list_files(&filesystem.root),
                 [".tag/files/bar", ".tag/tags/bar/tag/foo", "foo-_bar"].map(PathBuf::from)
@@ -1410,9 +1350,7 @@ mod tests {
         with_tempdir(|| {
             let filesystem = tagged_filesystem();
             create_dir(PathBuf::from(METADATA_DIR).join(TAGS_DIR).join("bar")).unwrap();
-            assert!(filesystem
-                .mkdir([], Name::new("bar".to_owned()).unwrap())
-                .is_err());
+            assert!(filesystem.mkdir([], name("bar")).is_err());
             assert_eq!(
                 list_files(&filesystem.root),
                 [".tag/files", ".tag/tags/bar"].map(PathBuf::from)
@@ -1425,13 +1363,7 @@ mod tests {
         with_tempdir(|| {
             let filesystem = tagged_filesystem();
             assert!(filesystem
-                .mkdir(
-                    [
-                        Tag::new("foo".to_owned()).unwrap(),
-                        Tag::new("foo".to_owned()).unwrap()
-                    ],
-                    Name::new("bar".to_owned()).unwrap()
-                )
+                .mkdir([tag("foo"), tag("foo")], name("bar"))
                 .is_err());
             assert_eq!(
                 list_files(&filesystem.root),
@@ -1444,7 +1376,7 @@ mod tests {
     fn rm_removes_file_if_it_exists() {
         with_tempdir(|| {
             let filesystem = tagged_filesystem_with(["_foo"]);
-            assert!(filesystem.rm(Name::new("foo".to_owned()).unwrap()).is_ok());
+            assert!(filesystem.rm(name("foo")).is_ok());
             assert_eq!(
                 list_files(&filesystem.root),
                 [".tag/files", ".tag/tags"].map(PathBuf::from)
@@ -1456,10 +1388,9 @@ mod tests {
     fn rm_removes_dir_if_it_exists() {
         with_tempdir(|| {
             let filesystem = tagged_filesystem();
-            let name = Name::new("foo".to_owned()).unwrap();
-            filesystem.mkdir([], name.clone()).unwrap();
+            filesystem.mkdir([], name("foo")).unwrap();
 
-            assert!(filesystem.rm(name).is_ok());
+            assert!(filesystem.rm(name("foo")).is_ok());
             assert_eq!(
                 list_files(&filesystem.root),
                 [".tag/files", ".tag/tags"].map(PathBuf::from)
@@ -1471,7 +1402,7 @@ mod tests {
     fn rm_errors_on_missing_file() {
         with_tempdir(|| {
             let filesystem = tagged_filesystem();
-            assert!(filesystem.rm(Name::new("foo".to_owned()).unwrap()).is_err());
+            assert!(filesystem.rm(name("foo")).is_err());
             assert_eq!(
                 list_files(&filesystem.root),
                 [".tag/files", ".tag/tags"].map(PathBuf::from)
@@ -1528,12 +1459,7 @@ mod tests {
         with_tempdir(|| {
             let filesystem = tagged_filesystem_with(["foo-_bar"]);
             assert_eq!(
-                filesystem
-                    .rename(
-                        Name::new("bar".to_owned()).unwrap(),
-                        Name::new("baz".to_owned()).unwrap()
-                    )
-                    .unwrap(),
+                filesystem.rename(name("bar"), name("baz")).unwrap(),
                 PathBuf::from("foo-_baz")
             );
             assert_eq!(
@@ -1542,7 +1468,7 @@ mod tests {
             );
             assert_eq!(
                 read_link(filesystem.root.join("foo-_baz")).unwrap(),
-                filesystem.root.file(Name::new("baz".to_owned()).unwrap())
+                filesystem.root.file(name("baz"))
             );
         })
     }
@@ -1569,12 +1495,7 @@ mod tests {
     fn rename_errors_if_file_does_not_exist() {
         with_tempdir(|| {
             let filesystem = tagged_filesystem();
-            assert!(filesystem
-                .rename(
-                    Name::new("bar".to_owned()).unwrap(),
-                    Name::new("baz".to_owned()).unwrap()
-                )
-                .is_err());
+            assert!(filesystem.rename(name("bar"), name("baz")).is_err());
             assert_eq!(
                 list_files(&filesystem.root),
                 [".tag/files", ".tag/tags"].map(PathBuf::from)
@@ -1586,12 +1507,7 @@ mod tests {
     fn rename_errors_if_file_exists_with_new_name() {
         with_tempdir(|| {
             let filesystem = tagged_filesystem_with(["fiz-_bar", "foo-_baz"]);
-            assert!(filesystem
-                .rename(
-                    Name::new("bar".to_owned()).unwrap(),
-                    Name::new("baz".to_owned()).unwrap()
-                )
-                .is_err());
+            assert!(filesystem.rename(name("bar"), name("baz")).is_err());
             assert_eq!(
                 list_files(&filesystem.root),
                 [
@@ -1614,7 +1530,7 @@ mod tests {
             let filesystem = tagged_filesystem_with([&path]);
             filesystem
                 .modify(
-                    [Tag::new("bar".to_owned()).unwrap()].into_iter().collect(),
+                    [tag("bar")].into_iter().collect(),
                     [].into_iter().collect(),
                     [path].into_iter().collect(),
                 )
@@ -1640,7 +1556,7 @@ mod tests {
             filesystem
                 .modify(
                     [].into_iter().collect(),
-                    [Tag::new("foo".to_owned()).unwrap()].into_iter().collect(),
+                    [tag("foo")].into_iter().collect(),
                     [path].into_iter().collect(),
                 )
                 .unwrap();
@@ -1658,8 +1574,8 @@ mod tests {
             let filesystem = tagged_filesystem_with([&path]);
             filesystem
                 .modify(
-                    [Tag::new("bar".to_owned()).unwrap()].into_iter().collect(),
-                    [Tag::new("foo".to_owned()).unwrap()].into_iter().collect(),
+                    [tag("bar")].into_iter().collect(),
+                    [tag("foo")].into_iter().collect(),
                     [path].into_iter().collect(),
                 )
                 .unwrap();
@@ -1677,8 +1593,8 @@ mod tests {
             let filesystem = tagged_filesystem_with(paths);
             filesystem
                 .modify(
-                    [Tag::new("bar".to_owned()).unwrap()].into_iter().collect(),
-                    [Tag::new("foo".to_owned()).unwrap()].into_iter().collect(),
+                    [tag("bar")].into_iter().collect(),
+                    [tag("foo")].into_iter().collect(),
                     paths
                         .into_iter()
                         .map(|path| TaggedPath::new(path.to_owned()).unwrap())
@@ -1707,13 +1623,8 @@ mod tests {
             let filesystem = tagged_filesystem_with([&path]);
             filesystem
                 .modify(
-                    [
-                        Tag::new("bar".to_owned()).unwrap(),
-                        Tag::new("baz".to_owned()).unwrap(),
-                    ]
-                    .into_iter()
-                    .collect(),
-                    [Tag::new("foo".to_owned()).unwrap()].into_iter().collect(),
+                    [tag("bar"), tag("baz")].into_iter().collect(),
+                    [tag("foo")].into_iter().collect(),
                     [path].into_iter().collect(),
                 )
                 .unwrap();
@@ -1736,21 +1647,10 @@ mod tests {
             let filesystem = tagged_filesystem_with(["foo-baz-_baz"]);
             filesystem
                 .modify(
-                    [Tag::new("bar".to_owned()).unwrap()].into_iter().collect(),
-                    [
-                        Tag::new("foo".to_owned()).unwrap(),
-                        Tag::new("baz".to_owned()).unwrap(),
-                    ]
-                    .into_iter()
-                    .collect(),
+                    [tag("bar")].into_iter().collect(),
+                    [tag("foo"), tag("baz")].into_iter().collect(),
                     filesystem
-                        .find(
-                            vec![
-                                Tag::new("foo".to_owned()).unwrap(),
-                                Tag::new("baz".to_owned()).unwrap(),
-                            ],
-                            vec![],
-                        )
+                        .find(vec![tag("foo"), tag("baz")], vec![])
                         .unwrap()
                         .collect(),
                 )
@@ -1830,7 +1730,7 @@ mod tests {
             let filesystem = tagged_filesystem_with([&path]);
             assert!(filesystem
                 .modify(
-                    [Tag::new("foo".to_owned()).unwrap()].into_iter().collect(),
+                    [tag("foo")].into_iter().collect(),
                     [].into_iter().collect(),
                     [path].into_iter().collect()
                 )
@@ -1846,7 +1746,7 @@ mod tests {
             assert!(filesystem
                 .modify(
                     [].into_iter().collect(),
-                    [Tag::new("foo".to_owned()).unwrap()].into_iter().collect(),
+                    [tag("foo")].into_iter().collect(),
                     [path].into_iter().collect()
                 )
                 .is_err());
@@ -1859,8 +1759,8 @@ mod tests {
             let filesystem = tagged_filesystem();
             assert!(filesystem
                 .modify(
-                    [Tag::new("bar".to_owned()).unwrap()].into_iter().collect(),
-                    [Tag::new("foo".to_owned()).unwrap()].into_iter().collect(),
+                    [tag("bar")].into_iter().collect(),
+                    [tag("foo")].into_iter().collect(),
                     [TaggedPath::new("foo-_baz".to_owned()).unwrap()]
                         .into_iter()
                         .collect()
@@ -2376,7 +2276,7 @@ mod tests {
             let filesystem = tagged_filesystem_with(["foo-_1", "bar-_2"]);
             assert_eq!(
                 filesystem
-                    .find(vec![Tag::new("foo".into()).unwrap()], vec![])
+                    .find(vec![tag("foo")], vec![])
                     .unwrap()
                     .collect_vec(),
                 [TaggedPath::new("foo-_1".into()).unwrap()]
@@ -2390,13 +2290,7 @@ mod tests {
             let filesystem = tagged_filesystem_with(["foo/bar-_1", "foo/_2"]);
             assert_eq!(
                 filesystem
-                    .find(
-                        vec![
-                            Tag::new("foo".into()).unwrap(),
-                            Tag::new("bar".into()).unwrap()
-                        ],
-                        vec![],
-                    )
+                    .find(vec![tag("foo"), tag("bar")], vec![],)
                     .unwrap()
                     .collect_vec(),
                 [TaggedPath::new("foo/bar-_1".into()).unwrap()]
@@ -2410,15 +2304,20 @@ mod tests {
             let filesystem = tagged_filesystem_with(["foo/bar-_1", "foo/_2"]);
             assert_eq!(
                 filesystem
-                    .find(
-                        vec![Tag::new("foo".into()).unwrap(),],
-                        vec![Tag::new("bar".into()).unwrap()],
-                    )
+                    .find(vec![tag("foo"),], vec![tag("bar")],)
                     .unwrap()
                     .collect_vec(),
                 [TaggedPath::new("foo/_2".into()).unwrap()]
             );
         })
+    }
+
+    fn name(s: &str) -> Name {
+        Name::new(s.to_owned()).unwrap()
+    }
+
+    fn tag(s: &str) -> Tag {
+        Tag::new(s.to_owned()).unwrap()
     }
 
     fn list_tagged_paths<P>(path: P) -> Vec<PathBuf>
