@@ -283,7 +283,7 @@ impl TaggedFilesystem {
         }
 
         let tag_set = unique_tags(tags)?;
-        let tagged_path = TaggedPath::from_tags(tag_set.iter(), name)?;
+        let tagged_path = TaggedPath::from_tags(&tag_set, name);
 
         create_dir(&file_tags_path)?;
         let tags_path = file_tags_path.join(PROGRAM_TAGS_DIR);
@@ -385,9 +385,10 @@ impl TaggedFilesystem {
             .filtered_tagged_paths(move |path| path.name() == old_name.as_ref())
             .next()
         {
-            let new_tagged_path =
-                TaggedPath::from_tags(old_tagged_path.tags().map(|tag| tag.to_owned()), new_name)
-                    .unwrap();
+            let new_tagged_path = TaggedPath::from_tags(
+                &old_tagged_path.tags().map(|tag| tag.to_owned()).collect(),
+                new_name,
+            );
             remove_file(old_tagged_path.as_path())?;
             if new_file_path.is_dir() {
                 symlink_dir(new_file_path, &new_tagged_path)?;
@@ -457,24 +458,21 @@ impl TaggedFilesystem {
             }
 
             let mut deleted_count = 0;
-            // This method is safe
-            // because `tags` were already checked for duplicates,
-            // and `name` is from a valid `TaggedPath`.
-            let new_path = unsafe {
-                TaggedPath::from_tags_unchecked(
-                    path.tags()
-                        .filter(|tag| {
-                            if del.contains(*tag) {
-                                deleted_count += 1;
-                                false
-                            } else {
-                                true
-                            }
-                        })
-                        .chain(add.iter().map(|tag| tag.as_ref())),
-                    path.name(),
-                )
-            };
+            let new_path = TaggedPath::from_tags(
+                &path
+                    .tags()
+                    .filter(|tag| {
+                        if del.contains(*tag) {
+                            deleted_count += 1;
+                            false
+                        } else {
+                            true
+                        }
+                    })
+                    .chain(add.iter().map(|tag| tag.as_ref()))
+                    .collect(),
+                path.name(),
+            );
             if deleted_count != del.len() {
                 let mut del = del;
                 for tag in path.tags() {
@@ -593,7 +591,7 @@ impl TaggedFilesystem {
             let mut new_paths = Vec::new();
             for name in &names {
                 if !path_names.contains(name) {
-                    new_paths.push(TaggedPath::from_tags(self.tags(name)?, name).unwrap());
+                    new_paths.push(TaggedPath::from_tags(&self.tags(name)?, name));
                 }
             }
             new_paths
@@ -606,7 +604,7 @@ impl TaggedFilesystem {
                 let path_tags = path.tags().map(|tag| tag.to_owned()).collect();
                 if tags != path_tags {
                     let original_path = path.as_path().to_path_buf();
-                    *path = TaggedPath::from_tags(tags, path.name()).unwrap();
+                    *path = TaggedPath::from_tags(&tags, path.name());
                     modified_paths_to_from.insert(path.as_path().to_path_buf(), original_path);
                 }
             }
@@ -1873,10 +1871,12 @@ mod tests {
     #[proptest(cases = 20)]
     fn build_deletes_extra_tags_from_tagged_paths(paths: TaggedPaths, path: TaggedPath, tag: Tag) {
         let path = TaggedPath::from_tags(
-            path.tags().filter(|path_tag| path_tag != &tag.as_ref()),
+            &path
+                .tags()
+                .filter(|path_tag| path_tag != &tag.as_ref())
+                .collect(),
             path.name(),
-        )
-        .unwrap();
+        );
 
         let (actual, expected) = with_tempdir(|| {
             let filesystem = tagged_filesystem_with(paths.iter().chain([&path]));
@@ -1903,10 +1903,12 @@ mod tests {
     #[proptest(cases = 20)]
     fn build_adds_missing_tags_to_tagged_paths(paths: TaggedPaths, path: TaggedPath, tag: Tag) {
         let path = TaggedPath::from_tags(
-            path.tags().filter(|path_tag| path_tag != &tag.as_ref()),
+            &path
+                .tags()
+                .filter(|path_tag| path_tag != &tag.as_ref())
+                .collect(),
             path.name(),
-        )
-        .unwrap();
+        );
 
         let (actual, expected) = with_tempdir(|| {
             let filesystem = tagged_filesystem_with(paths);

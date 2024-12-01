@@ -5,6 +5,7 @@ use std::{
 };
 
 use itertools::Itertools;
+use rustc_hash::FxHashSet;
 
 use crate::{NameRef, TagRef, DIR_SEPARATOR, INLINE_SEPARATOR, SEPARATORS, TAG_END};
 
@@ -118,19 +119,35 @@ impl TaggedPath {
         )
     }
 
-    pub fn from_tags<T, N>(
-        tags: impl IntoIterator<Item = T>,
-        name: N,
-    ) -> Result<TaggedPath, NewError>
+    pub fn from_tags<T, N>(tags: &FxHashSet<T>, name: N) -> TaggedPath
     where
         T: AsRef<TagRef>,
         N: AsRef<NameRef>,
     {
-        let this = unsafe { Self::from_tags_unchecked(tags, name) };
-        if this.tags_unique() {
-            Ok(this)
-        } else {
-            Err(NewError(this.path))
+        let mut tag_indices = Vec::new();
+        let mut start = 0;
+
+        let path = format!(
+            "{}{TAG_END}{}",
+            tags.iter().format_with("", |tag, f| {
+                let end = start + tag.as_ref().len();
+                tag_indices.push(TagIndices(start, end));
+                start = end + 1;
+
+                f(&tag.as_ref())?;
+                f(&INLINE_SEPARATOR)?;
+                Ok(())
+            }),
+            name.as_ref(),
+        );
+
+        let start = start + 1; // Offset for tag-end character.
+        let name = SliceIndices(start, start + name.as_ref().len());
+
+        Self {
+            path,
+            name,
+            tags: tag_indices,
         }
     }
 
@@ -153,45 +170,6 @@ impl TaggedPath {
 
     fn name_valid(&self) -> bool {
         !self.name().as_str().contains(DIR_SEPARATOR)
-    }
-
-    /// # Safety
-    ///
-    /// `tags` must not contain duplicates
-    /// and `name` must be valid.
-    pub unsafe fn from_tags_unchecked<T, N>(
-        tags: impl IntoIterator<Item = T>,
-        name: N,
-    ) -> TaggedPath
-    where
-        T: AsRef<TagRef>,
-        N: AsRef<NameRef>,
-    {
-        let mut tag_indices = Vec::new();
-        let mut start = 0;
-
-        let path = format!(
-            "{}{TAG_END}{}",
-            tags.into_iter().format_with("", |tag, f| {
-                let end = start + tag.as_ref().len();
-                tag_indices.push(TagIndices(start, end));
-                start = end + 1;
-
-                f(&tag.as_ref())?;
-                f(&INLINE_SEPARATOR)?;
-                Ok(())
-            }),
-            name.as_ref(),
-        );
-
-        let start = start + 1; // Offset for tag-end character.
-        let name = SliceIndices(start, start + name.as_ref().len());
-
-        Self {
-            path,
-            name,
-            tags: tag_indices,
-        }
     }
 
     pub fn name(&self) -> &NameRef {
@@ -279,6 +257,8 @@ impl AsRef<str> for TaggedPath {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use once_cell::sync::Lazy;
     use proptest::prelude::*;
     use test_strategy::proptest;
@@ -350,25 +330,11 @@ mod tests {
     }
 
     #[proptest]
-    fn from_tags_matches_new(tags: Vec<Tag>, name: Name) {
-        match TaggedPath::from_tags(tags, name) {
-            Ok(path) => {
-                prop_assert_eq!(
-                    TaggedPath::from_path(path.as_path().to_owned()).unwrap(),
-                    path
-                );
-            }
-            Err(e) => {
-                prop_assert_eq!(TaggedPath::from_path(e.clone().into_path()), Err(e));
-            }
-        }
-    }
-
-    #[proptest]
-    fn from_tags_unchecked_returns_correct_path(path: TaggedPath) {
+    fn from_tags_matches_new(tags: HashSet<Tag>, name: Name) {
+        let path = TaggedPath::from_tags(&tags.into_iter().collect(), name);
         prop_assert_eq!(
-            unsafe { TaggedPath::from_tags_unchecked(path.tags(), path.name()) },
-            TaggedPath::from_tags(path.tags(), path.name()).unwrap()
+            TaggedPath::from_path(path.as_path().to_owned()).unwrap(),
+            path
         );
     }
 
