@@ -2,7 +2,7 @@ use once_cell::sync::Lazy;
 
 use crate::{SEPARATORS, TAG_END};
 
-pub use self::{fs::*, tag::*, tagged_filesystem::*, tagged_path::*};
+pub use self::{fs::*, name::*, tag::*, tagged_filesystem::*, tagged_path::*};
 
 pub static SEPARATORS_STRING: Lazy<String> = Lazy::new(|| SEPARATORS.iter().collect());
 static _SEPARATORS_AND_ENDS: Lazy<String> =
@@ -245,6 +245,10 @@ mod tag {
 
     use crate::Tag;
 
+    pub fn tag(s: &str) -> Tag {
+        Tag::new(s.to_owned()).unwrap()
+    }
+
     pub const TAGS: &[&str] = &[
         "foo", "bar", "baz", "qux", "quux", "corge", "grault", "garply", "waldo", "fred", "plugh",
         "xyzzy", "thud",
@@ -267,6 +271,10 @@ mod name {
     use uuid::Uuid;
 
     use crate::Name;
+
+    pub fn name(s: &str) -> Name {
+        Name::new(s.to_owned()).unwrap()
+    }
 
     impl Arbitrary for Name {
         type Parameters = ();

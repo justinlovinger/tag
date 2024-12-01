@@ -5,7 +5,6 @@ mod root;
 mod tag;
 mod tagged_filesystem;
 mod tagged_path;
-mod types;
 
 #[cfg(test)]
 mod testing;

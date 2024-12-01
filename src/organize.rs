@@ -2,14 +2,15 @@ use internment::Intern;
 use itertools::Itertools;
 
 use crate::{
-    types::MoveOp, Tag, TaggedPath, DIR_SEPARATOR, INLINE_SEPARATOR, PATH_PART_MAX_LEN, TAG_END,
+    tagged_filesystem::MoveOp, Tag, TaggedPath, DIR_SEPARATOR, INLINE_SEPARATOR, PATH_PART_MAX_LEN,
+    TAG_END,
 };
 
 use self::partition::{Partition, TagsPaths};
 
 type Prefix = Vec<(Intern<Tag>, usize)>; // (tag, count)
 
-pub fn organize(paths: &[TaggedPath]) -> Vec<MoveOp> {
+pub(crate) fn organize(paths: &[TaggedPath]) -> Vec<MoveOp> {
     _organize(Partition::new(paths), Default::default())
 }
 
