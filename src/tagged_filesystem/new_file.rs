@@ -6,7 +6,7 @@ pub enum NewFileError {
     FileExists(#[from] FileExistsError),
     MetadataExists(#[from] MetadataExistsError),
     NonUniqueTag(#[from] NonUniqueTagError),
-    New(#[from] NewError),
+    New(#[from] TaggedPathError),
     Filesystem(#[from] std::io::Error),
 }
 

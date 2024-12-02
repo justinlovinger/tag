@@ -1,3 +1,5 @@
+use crate::tag::TagError;
+
 use super::*;
 
 #[derive(Debug, thiserror::Error)]
@@ -49,15 +51,15 @@ pub struct NonUniqueTagError;
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub enum TagsError {
-    InvalidString(#[from] InvalidStringError),
-    InvalidTag(#[from] InvalidTagError),
+    InvalidString(#[from] StringFromPathError),
+    InvalidTag(#[from] TagFromPathError),
     Filesystem(#[from] std::io::Error),
 }
 
 #[derive(Debug, thiserror::Error)]
 #[error("`{0}` is not a valid Unicode string")]
-pub struct InvalidStringError(pub(crate) PathBuf);
+pub struct StringFromPathError(pub(crate) PathBuf);
 
 #[derive(Debug, thiserror::Error)]
-#[error("`{0}` is not a valid tag")]
-pub struct InvalidTagError(pub(crate) PathBuf);
+#[error("{0}. Tag was from `{1}`.")]
+pub struct TagFromPathError(pub(crate) TagError, pub(crate) PathBuf);

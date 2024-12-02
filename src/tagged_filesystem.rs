@@ -22,7 +22,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::{
     fs::{copy_dir, symlink_dir, symlink_file},
     organize::organize,
-    tagged_path::NewError,
+    tagged_path::TaggedPathError,
     Name, NameRef, Root, Tag, TagRef, TaggedPath, FILES_DIR, METADATA_DIR, PROGRAM_TAGS_DIR,
     TAGS_DIR,
 };
@@ -96,15 +96,14 @@ impl TaggedFilesystem {
             for entry in std::fs::read_dir(namespace)? {
                 let entry = entry?;
                 match entry.file_name().into_string() {
-                    Ok(s) => {
-                        if let Some(tag) = Tag::new(s) {
+                    Ok(s) => match Tag::new(s) {
+                        Ok(tag) => {
                             tags.insert(tag);
-                        } else {
-                            return Err(InvalidTagError(entry.path()).into());
                         }
-                    }
+                        Err(e) => return Err(TagFromPathError(e, entry.path()).into()),
+                    },
                     Err(_) => {
-                        return Err(InvalidStringError(entry.path()).into());
+                        return Err(StringFromPathError(entry.path()).into());
                     }
                 }
             }

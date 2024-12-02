@@ -8,10 +8,7 @@ use std::{
 
 use clap::{Parser, Subcommand};
 use itertools::Itertools;
-use tag::{
-    Name, Tag, TaggedFilesystem, TaggedFilesystemBuilder, TaggedPath, DIR_SEPARATOR,
-    INLINE_SEPARATOR, TAG_END,
-};
+use tag::{Name, Tag, TaggedFilesystem, TaggedFilesystemBuilder, TaggedPath};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -64,21 +61,21 @@ enum Commands {
     /// Create an empty file with the given tags and name
     Touch {
         /// Tags to add to the file
-        #[clap(value_name = "TAG", value_parser = tag_parser)]
+        #[clap(value_name = "TAG")]
         tags: Vec<Tag>,
 
         /// Name of the file
-        #[clap(required = true, value_name = "NAME", value_parser = name_parser)]
+        #[clap(required = true, value_name = "NAME")]
         name: Name,
     },
     /// Create an empty directory with the given tags and name
     Mkdir {
         /// Tags to add to the directory
-        #[clap(value_name = "TAG", value_parser = tag_parser)]
+        #[clap(value_name = "TAG")]
         tags: Vec<Tag>,
 
         /// Name of the directory
-        #[clap(required = true, value_name = "NAME", value_parser = name_parser)]
+        #[clap(required = true, value_name = "NAME")]
         name: Name,
     },
     /// Remove a tagged file or directory
@@ -98,51 +95,51 @@ enum Commands {
         file: PathOrName,
 
         /// New name
-        #[clap(required = true, value_name = "NEW_NAME", value_parser = name_parser)]
+        #[clap(required = true, value_name = "NEW_NAME")]
         new_name: Name,
     },
     /// Add tags to files and print new tagged paths
     Add {
         /// Tag to add
-        #[clap(required = true, value_name = "TAG", value_parser = tag_parser)]
+        #[clap(required = true, value_name = "TAG")]
         tag: Tag,
 
         /// Files to tag
-        #[clap(required = true, value_name = "FILE", value_parser = tagged_file_parser)]
+        #[clap(required = true, value_name = "FILE")]
         files: Vec<TaggedPath>,
     },
     /// Delete tags from files and print new tagged paths
     Del {
         /// Tag to delete
-        #[clap(required = true, value_name = "TAG", value_parser = tag_parser)]
+        #[clap(required = true, value_name = "TAG")]
         tag: Tag,
 
         /// Files to delete tag from
-        #[clap(required = true, value_name = "FILE", value_parser = tagged_file_parser)]
+        #[clap(required = true, value_name = "FILE")]
         files: Vec<TaggedPath>,
     },
     /// Add and delete tags from files and print new tagged paths
     Mod {
         /// Tags to add
-        #[clap(short, long, value_name = "TAG", value_parser = tag_parser)]
+        #[clap(short, long, value_name = "TAG")]
         add: Vec<Tag>,
 
         /// Tags to delete
-        #[clap(short, long, value_name = "TAG", value_parser = tag_parser)]
+        #[clap(short, long, value_name = "TAG")]
         del: Vec<Tag>,
 
         /// Files to modify
-        #[clap(required = true, value_name = "FILE", value_parser = tagged_file_parser)]
+        #[clap(required = true, value_name = "FILE")]
         files: Vec<TaggedPath>,
     },
     /// Print tagged paths of files with given tags
     Find {
         /// Find files including *all* these tags
-        #[clap(value_name = "TAG", value_parser = tag_parser)]
+        #[clap(value_name = "TAG")]
         include: Vec<Tag>,
 
         /// Ignore files including *any* of these tags
-        #[clap(long, short, value_name = "TAG", value_parser = tag_parser)]
+        #[clap(long, short, value_name = "TAG")]
         exclude: Vec<Tag>,
 
         /// Sort output by name
@@ -165,31 +162,13 @@ impl FromStr for PathOrName {
         match TaggedPath::new(s) {
             Ok(path) => Ok(Self::Path(path)),
             Err(e) => {
-                let msg = e.to_string();
+                let path_msg = e.to_string();
                 Name::new(e.into_string())
-                    .ok_or_else(|| anyhow::Error::msg(format!("{msg}. {}.", name_error())))
+                    .map_err(|e| anyhow::Error::msg(format!("{path_msg}. {e}.")))
                     .map(Self::Name)
             }
         }
     }
-}
-
-fn tag_parser(s: &str) -> Result<Tag, String> {
-    Tag::new(s.to_owned()).ok_or_else(|| format!(
-        "tags cannot start with `.` or `{TAG_END}` or contain `{INLINE_SEPARATOR}` or `{DIR_SEPARATOR}`"
-    ))
-}
-
-fn name_parser(s: &str) -> Result<Name, String> {
-    Name::new(s.to_owned()).ok_or_else(name_error)
-}
-
-fn name_error() -> String {
-    format!("name cannot contain `{DIR_SEPARATOR}`")
-}
-
-fn tagged_file_parser(s: &str) -> Result<TaggedPath, String> {
-    TaggedPath::new(s.to_owned()).map_err(|e| e.to_string())
 }
 
 fn main() -> anyhow::Result<()> {

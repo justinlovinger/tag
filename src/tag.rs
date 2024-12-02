@@ -1,9 +1,13 @@
-use std::{borrow::Borrow, cmp::Ordering, ops::Deref, path::Path};
+use std::{borrow::Borrow, cmp::Ordering, ops::Deref, path::Path, str::FromStr};
 
 use derive_more::Display;
 use ref_cast::{ref_cast_custom, RefCastCustom};
 
-use crate::{SEPARATORS, TAG_END};
+use crate::{DIR_SEPARATOR, INLINE_SEPARATOR, SEPARATORS, TAG_END};
+
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid tag: `{0}`. Tags cannot start with `.` or `{TAG_END}` or contain `{INLINE_SEPARATOR}` or `{DIR_SEPARATOR}`.")]
+pub struct TagError(String);
 
 #[derive(Clone, Debug, Display, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Tag(String);
@@ -13,20 +17,28 @@ pub struct Tag(String);
 pub struct TagRef(str);
 
 impl Tag {
-    pub fn new(s: String) -> Option<Tag> {
+    pub fn new(s: String) -> Result<Tag, TagError> {
         if s.is_empty()
             || s.starts_with(TAG_END)
             || s.starts_with('.')
             || s.chars().any(|c| SEPARATORS.iter().any(|sep| &c == sep))
         {
-            None
+            Err(TagError(s))
         } else {
-            Some(Tag(s))
+            Ok(Tag(s))
         }
     }
 
     pub fn as_path(&self) -> &Path {
         self.0.as_ref()
+    }
+}
+
+impl FromStr for Tag {
+    type Err = TagError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::new(s.to_owned())
     }
 }
 
@@ -141,30 +153,30 @@ mod tests {
 
     #[test]
     fn new_returns_none_for_empty_strings() {
-        assert!(Tag::new(String::new()).is_none());
+        assert!(Tag::new(String::new()).is_err());
     }
 
     #[proptest]
     fn new_returns_none_for_strings_starting_with_tag_end(tag: Tag) {
         let s = format!("{TAG_END}{tag}");
-        prop_assert!(Tag::new(s).is_none());
+        prop_assert!(Tag::new(s).is_err());
     }
 
     #[proptest]
     fn new_returns_none_for_strings_containing_a_separator(tag_one: Tag, tag_two: Tag) {
         {
             let s = format!("{tag_one}{DIR_SEPARATOR}{tag_two}");
-            prop_assert!(Tag::new(s).is_none());
+            prop_assert!(Tag::new(s).is_err());
         }
         {
             let s = format!("{tag_one}{INLINE_SEPARATOR}{tag_two}");
-            prop_assert!(Tag::new(s).is_none());
+            prop_assert!(Tag::new(s).is_err());
         }
     }
 
     #[proptest]
     fn new_returns_none_for_strings_starting_with_dot(tag: Tag) {
         let s = format!(".{tag}");
-        prop_assert!(Tag::new(s).is_none());
+        prop_assert!(Tag::new(s).is_err());
     }
 }

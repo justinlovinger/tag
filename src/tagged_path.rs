@@ -2,12 +2,27 @@ use std::{
     fmt,
     hash::Hash,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use itertools::Itertools;
 use rustc_hash::FxHashSet;
 
 use crate::{NameRef, TagRef, DIR_SEPARATOR, INLINE_SEPARATOR, SEPARATORS, TAG_END};
+
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
+#[error("`{0}` is not a tagged path: tagged paths must contain zero or more unique tags ended by `{INLINE_SEPARATOR}` or `{DIR_SEPARATOR}` with the tagging portion ended by `{TAG_END}`")]
+pub struct TaggedPathError(String);
+
+impl TaggedPathError {
+    pub fn into_path(self) -> PathBuf {
+        self.0.into()
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
 
 #[derive(Clone)]
 pub struct TaggedPath {
@@ -22,8 +37,14 @@ pub struct TaggedPath {
     tags: Vec<TagIndices>,
 }
 
-// Includes indices makes debugging more difficult.
+// Including indices makes debugging more difficult.
 impl fmt::Debug for TaggedPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.path.fmt(f)
+    }
+}
+
+impl fmt::Display for TaggedPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.path.fmt(f)
     }
@@ -65,22 +86,8 @@ impl From<TagIndices> for SliceIndices {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, thiserror::Error)]
-#[error("`{0}` is not a tagged path: tagged paths must contain zero or more unique tags ended by `{INLINE_SEPARATOR}` or `{DIR_SEPARATOR}` with the tagging portion ended by `{TAG_END}`")]
-pub struct NewError(String);
-
-impl NewError {
-    pub fn into_path(self) -> PathBuf {
-        self.0.into()
-    }
-
-    pub fn into_string(self) -> String {
-        self.0
-    }
-}
-
 impl TaggedPath {
-    pub fn new(path: String) -> Result<TaggedPath, NewError> {
+    pub fn new(path: String) -> Result<TaggedPath, TaggedPathError> {
         let mut tags = Vec::new();
         let mut tag_start = 0;
         for (i, c) in path.char_indices() {
@@ -95,11 +102,11 @@ impl TaggedPath {
                     return if this.tags_unique() && this.name_valid() {
                         Ok(this)
                     } else {
-                        Err(NewError(this.path))
+                        Err(TaggedPathError(this.path))
                     };
                 } else if SEPARATORS.contains(&c) || c == '.' {
                     // Tag is empty if `c` is separator.
-                    return Err(NewError(path));
+                    return Err(TaggedPathError(path));
                 }
             } else if SEPARATORS.contains(&c) {
                 tags.push(TagIndices(tag_start, i));
@@ -108,10 +115,10 @@ impl TaggedPath {
                 tag_start = i + c.len_utf8();
             }
         }
-        Err(NewError(path))
+        Err(TaggedPathError(path))
     }
 
-    pub fn from_path(path: PathBuf) -> Result<TaggedPath, NewError> {
+    pub fn from_path(path: PathBuf) -> Result<TaggedPath, TaggedPathError> {
         Self::new(
             path.into_os_string()
                 .into_string()
@@ -231,9 +238,11 @@ impl TaggedPath {
     }
 }
 
-impl fmt::Display for TaggedPath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.path.fmt(f)
+impl FromStr for TaggedPath {
+    type Err = TaggedPathError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::new(s.to_owned())
     }
 }
 
@@ -280,7 +289,7 @@ mod tests {
         // to ensure a wide variety of paths are tested.
         if let Ok(path) = TaggedPath::new(s) {
             for tag in path.tags() {
-                prop_assert!(Tag::new(tag.to_string()).is_some())
+                prop_assert!(Tag::new(tag.to_string()).is_ok())
             }
         }
     }

@@ -1,9 +1,13 @@
-use std::{borrow::Borrow, ops::Deref, path::Path};
+use std::{borrow::Borrow, ops::Deref, path::Path, str::FromStr};
 
 use derive_more::Display;
 use ref_cast::{ref_cast_custom, RefCastCustom};
 
 use crate::DIR_SEPARATOR;
+
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid name: `{0}`. Names cannot contain `{DIR_SEPARATOR}`.")]
+pub struct NameError(String);
 
 #[derive(Clone, Debug, Display, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Name(String);
@@ -13,11 +17,11 @@ pub struct Name(String);
 pub struct NameRef(str);
 
 impl Name {
-    pub fn new(s: String) -> Option<Name> {
+    pub fn new(s: String) -> Result<Name, NameError> {
         if s.is_empty() || s.contains(DIR_SEPARATOR) {
-            None
+            Err(NameError(s))
         } else {
-            Some(Name(s))
+            Ok(Name(s))
         }
     }
 
@@ -27,6 +31,14 @@ impl Name {
 
     pub fn as_str(&self) -> &str {
         self.0.as_str()
+    }
+}
+
+impl FromStr for Name {
+    type Err = NameError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::new(s.to_owned())
     }
 }
 
@@ -111,11 +123,11 @@ mod tests {
 
     #[test]
     fn new_returns_none_for_empty_strings() {
-        assert!(Name::new(String::new()).is_none());
+        assert!(Name::new(String::new()).is_err());
     }
 
     #[test]
     fn new_returns_none_for_strings_containing_a_directory_separator() {
-        assert!(Name::new(format!("foo{DIR_SEPARATOR}bar")).is_none());
+        assert!(Name::new(format!("foo{DIR_SEPARATOR}bar")).is_err());
     }
 }
