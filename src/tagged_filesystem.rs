@@ -13,7 +13,6 @@ use std::{
     env::current_dir,
     fs::{create_dir, create_dir_all, remove_dir, remove_dir_all, remove_file, rename, File},
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
 use itertools::Itertools;
@@ -302,22 +301,14 @@ mod tests {
                 .unwrap();
             let expected = list_files(&filesystem.root);
 
-            let path = filesystem
-                .del(
-                    tag.clone(),
-                    filesystem
-                        .filtered_tagged_paths(move |x| x.name() == path.name())
-                        .collect(),
-                )
+            filesystem
+                .del(tag.clone(), [path.name().to_owned()].into_iter().collect())
                 .unwrap()
                 .into_iter()
                 .next()
                 .unwrap();
             filesystem
-                .add(
-                    tag,
-                    [TaggedPath::from_path(path).unwrap()].into_iter().collect(),
-                )
+                .add(tag, [path.name().to_owned()].into_iter().collect())
                 .unwrap();
             let actual = list_files(&filesystem.root);
 
@@ -341,22 +332,14 @@ mod tests {
                 .unwrap();
             let expected = list_files(&filesystem.root);
 
-            let path = filesystem
-                .add(
-                    tag.clone(),
-                    filesystem
-                        .filtered_tagged_paths(move |x| x.name() == path.name())
-                        .collect(),
-                )
+            filesystem
+                .add(tag.clone(), [path.name().to_owned()].into_iter().collect())
                 .unwrap()
                 .into_iter()
                 .next()
                 .unwrap();
             filesystem
-                .del(
-                    tag,
-                    [TaggedPath::from_path(path).unwrap()].into_iter().collect(),
-                )
+                .del(tag, [path.name().to_owned()].into_iter().collect())
                 .unwrap();
             let actual = list_files(&filesystem.root);
 

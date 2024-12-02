@@ -105,8 +105,8 @@ enum Commands {
         tag: Tag,
 
         /// Files to tag
-        #[clap(required = true, value_name = "FILE")]
-        files: Vec<TaggedPath>,
+        #[clap(required = true, value_name = "PATH|NAME")]
+        files: Vec<PathOrName>,
     },
     /// Delete tags from files and print new tagged paths
     Del {
@@ -115,8 +115,8 @@ enum Commands {
         tag: Tag,
 
         /// Files to delete tag from
-        #[clap(required = true, value_name = "FILE")]
-        files: Vec<TaggedPath>,
+        #[clap(required = true, value_name = "PATH|NAME")]
+        files: Vec<PathOrName>,
     },
     /// Add and delete tags from files and print new tagged paths
     Mod {
@@ -129,8 +129,8 @@ enum Commands {
         del: Vec<Tag>,
 
         /// Files to modify
-        #[clap(required = true, value_name = "FILE")]
-        files: Vec<TaggedPath>,
+        #[clap(required = true, value_name = "PATH|NAME")]
+        files: Vec<PathOrName>,
     },
     /// Print tagged paths of files with given tags
     Find {
@@ -171,6 +171,15 @@ impl FromStr for PathOrName {
     }
 }
 
+impl From<PathOrName> for Name {
+    fn from(value: PathOrName) -> Self {
+        match value {
+            PathOrName::Path(path) => path.name().to_owned(),
+            PathOrName::Name(name) => name,
+        }
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
@@ -191,28 +200,24 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Build) => filesystem.build()?,
             Some(Commands::Touch { tags, name }) => print_paths([filesystem.touch(tags, name)?])?,
             Some(Commands::Mkdir { tags, name }) => print_paths([filesystem.mkdir(tags, name)?])?,
-            Some(Commands::Rm { file }) => match file {
-                PathOrName::Path(path) => filesystem.rm(path.name().to_owned()),
-                PathOrName::Name(name) => filesystem.rm(name),
-            }?,
-            Some(Commands::Rename { file, new_name }) => print_paths([match file {
-                PathOrName::Path(path) => filesystem.rename(path.name().to_owned(), new_name),
-                PathOrName::Name(name) => filesystem.rename(name, new_name),
-            }?])?,
+            Some(Commands::Rm { file }) => filesystem.rm(file.into())?,
+            Some(Commands::Rename { file, new_name }) => {
+                print_paths([filesystem.rename(file.into(), new_name)?])?
+            }
             // Ideally,
             // Clap would collect `add`, `del`, and `files` as the correct collections,
             // so we would not need to allocate each twice,
             // see <https://github.com/clap-rs/clap/issues/3114>.
             Some(Commands::Add { tag, files }) => {
-                print_paths(filesystem.add(tag, files.into_iter().collect())?)?
+                print_paths(filesystem.add(tag, files.into_iter().map_into().collect())?)?
             }
             Some(Commands::Del { tag, files }) => {
-                print_paths(filesystem.del(tag, files.into_iter().collect())?)?
+                print_paths(filesystem.del(tag, files.into_iter().map_into().collect())?)?
             }
             Some(Commands::Mod { add, del, files }) => print_paths(filesystem.r#mod(
                 add.into_iter().collect(),
                 del.into_iter().collect(),
-                files.into_iter().collect(),
+                files.into_iter().map_into().collect(),
             )?)?,
             Some(Commands::Find {
                 include,

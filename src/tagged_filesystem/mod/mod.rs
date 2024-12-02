@@ -9,25 +9,25 @@ pub enum ModError {
 }
 
 impl TaggedFilesystem {
-    pub fn add(&self, tag: Tag, paths: FxHashSet<TaggedPath>) -> Result<Vec<PathBuf>, ModError> {
-        self.r#mod([tag].into_iter().collect(), FxHashSet::default(), paths)
+    pub fn add(&self, tag: Tag, names: FxHashSet<Name>) -> Result<Vec<PathBuf>, ModError> {
+        self.r#mod([tag].into_iter().collect(), FxHashSet::default(), names)
     }
 
-    pub fn del(&self, tag: Tag, paths: FxHashSet<TaggedPath>) -> Result<Vec<PathBuf>, ModError> {
-        self.r#mod(FxHashSet::default(), [tag].into_iter().collect(), paths)
+    pub fn del(&self, tag: Tag, names: FxHashSet<Name>) -> Result<Vec<PathBuf>, ModError> {
+        self.r#mod(FxHashSet::default(), [tag].into_iter().collect(), names)
     }
 
     pub fn r#mod(
         &self,
         add: FxHashSet<Tag>,
         del: FxHashSet<Tag>,
-        paths: FxHashSet<TaggedPath>,
+        names: FxHashSet<Name>,
     ) -> Result<Vec<PathBuf>, ModError> {
         if add.is_empty() && del.is_empty() {
             return Ok(vec![]);
         }
 
-        for name in paths.iter().map(|path| path.name()) {
+        for name in &names {
             for tag in &add {
                 File::create(self.root.tag(name, tag))?;
             }
@@ -42,20 +42,17 @@ impl TaggedFilesystem {
             }
         }
 
-        let paths = Arc::new(paths);
-        let mut relevant_paths = relevant_paths(
+        let (paths, other_paths) = self
+            .tagged_paths()
+            .partition::<Vec<_>, _>(|path| names.contains(path.name()));
+        let mut relevant_other_paths = relevant_paths(
             paths
                 .iter()
                 .flat_map(|path| path.tags().map(|tag| tag.to_owned()))
                 .chain(add.iter().cloned())
-                .collect::<FxHashSet<_>>(),
-            self.filtered_tagged_paths({
-                let paths = Arc::clone(&paths);
-                move |path| !paths.contains(path)
-            })
-            .collect(),
+                .collect(),
+            other_paths,
         );
-        let paths = Arc::try_unwrap(paths).unwrap_or_else(|arc| (*arc).clone());
 
         let mut move_ops = Vec::new();
         for path in paths {
@@ -93,10 +90,10 @@ impl TaggedFilesystem {
                 from: path.into_path(),
                 to: new_path.as_path().to_owned(),
             });
-            relevant_paths.push(new_path);
+            relevant_other_paths.push(new_path);
         }
 
-        let mut organized_move_ops = organize(&relevant_paths);
+        let mut organized_move_ops = organize(&relevant_other_paths);
         let mut new_paths = Vec::new();
         for op in move_ops {
             match organized_move_ops
@@ -127,7 +124,9 @@ mod tests {
 
     use crate::{
         tagged_filesystem::tests::list_files,
-        testing::{tag, tagged_filesystem, tagged_filesystem_with, with_tempdir, TaggedPaths},
+        testing::{
+            name, tag, tagged_filesystem, tagged_filesystem_with, with_tempdir, TaggedPaths,
+        },
         Tag,
     };
 
@@ -136,13 +135,12 @@ mod tests {
     #[test]
     fn mod_adds_a_tag() {
         with_tempdir(|| {
-            let path = TaggedPath::new("foo-_baz".to_owned()).unwrap();
-            let filesystem = tagged_filesystem_with([&path]);
+            let filesystem = tagged_filesystem_with(["foo-_baz"]);
             filesystem
                 .r#mod(
                     [tag("bar")].into_iter().collect(),
                     [].into_iter().collect(),
-                    [path].into_iter().collect(),
+                    [name("baz")].into_iter().collect(),
                 )
                 .unwrap();
             assert_eq!(
@@ -161,13 +159,12 @@ mod tests {
     #[test]
     fn mod_deletes_a_tag() {
         with_tempdir(|| {
-            let path = TaggedPath::new("foo-_baz".to_owned()).unwrap();
-            let filesystem = tagged_filesystem_with([&path]);
+            let filesystem = tagged_filesystem_with(["foo-_baz"]);
             filesystem
                 .r#mod(
                     [].into_iter().collect(),
                     [tag("foo")].into_iter().collect(),
-                    [path].into_iter().collect(),
+                    [name("baz")].into_iter().collect(),
                 )
                 .unwrap();
             assert_eq!(
@@ -180,13 +177,12 @@ mod tests {
     #[test]
     fn mod_adds_a_tag_and_deletes_a_tag() {
         with_tempdir(|| {
-            let path = TaggedPath::new("foo-_baz".to_owned()).unwrap();
-            let filesystem = tagged_filesystem_with([&path]);
+            let filesystem = tagged_filesystem_with(["foo-_baz"]);
             filesystem
                 .r#mod(
                     [tag("bar")].into_iter().collect(),
                     [tag("foo")].into_iter().collect(),
-                    [path].into_iter().collect(),
+                    [name("baz")].into_iter().collect(),
                 )
                 .unwrap();
             assert_eq!(
@@ -199,16 +195,12 @@ mod tests {
     #[test]
     fn mod_modifies_all_files() {
         with_tempdir(|| {
-            let paths = ["foo/_bar", "foo/_foo"];
-            let filesystem = tagged_filesystem_with(paths);
+            let filesystem = tagged_filesystem_with(["foo/_bar", "foo/_foo"]);
             filesystem
                 .r#mod(
                     [tag("bar")].into_iter().collect(),
                     [tag("foo")].into_iter().collect(),
-                    paths
-                        .into_iter()
-                        .map(|path| TaggedPath::new(path.to_owned()).unwrap())
-                        .collect(),
+                    [name("bar"), name("foo")].into_iter().collect(),
                 )
                 .unwrap();
             assert_eq!(
@@ -229,13 +221,12 @@ mod tests {
     #[test]
     fn mod_adds_multiple_tags() {
         with_tempdir(|| {
-            let path = TaggedPath::new("foo-_baz".to_owned()).unwrap();
-            let filesystem = tagged_filesystem_with([&path]);
+            let filesystem = tagged_filesystem_with(["foo-_baz"]);
             filesystem
                 .r#mod(
                     [tag("bar"), tag("baz")].into_iter().collect(),
                     [tag("foo")].into_iter().collect(),
-                    [path].into_iter().collect(),
+                    [name("baz")].into_iter().collect(),
                 )
                 .unwrap();
             assert_eq!(
@@ -259,10 +250,7 @@ mod tests {
                 .r#mod(
                     [tag("bar")].into_iter().collect(),
                     [tag("foo"), tag("baz")].into_iter().collect(),
-                    filesystem
-                        .find(vec![tag("foo"), tag("baz")], vec![])
-                        .unwrap()
-                        .collect(),
+                    [name("baz")].into_iter().collect(),
                 )
                 .unwrap();
             assert_eq!(
@@ -283,9 +271,7 @@ mod tests {
                 .r#mod(
                     [].into_iter().collect(),
                     [].into_iter().collect(),
-                    filesystem
-                        .filtered_tagged_paths(move |x| x.name() == path.name())
-                        .collect(),
+                    [path.name().to_owned()].into_iter().collect(),
                 )
                 .unwrap();
             let actual = list_files(filesystem.root);
@@ -317,9 +303,7 @@ mod tests {
                 .r#mod(
                     [tag_to_add].into_iter().collect(),
                     [tag_to_del].into_iter().collect(),
-                    filesystem
-                        .filtered_tagged_paths(move |x| x.name() == path.name())
-                        .collect(),
+                    [path.name().to_owned()].into_iter().collect(),
                 )
                 .unwrap();
             let actual = list_files(&filesystem.root);
@@ -336,13 +320,12 @@ mod tests {
     #[test]
     fn mod_returns_error_if_file_already_has_tag() {
         with_tempdir(|| {
-            let path = TaggedPath::new("foo-_bar".to_owned()).unwrap();
-            let filesystem = tagged_filesystem_with([&path]);
+            let filesystem = tagged_filesystem_with(["foo-_bar"]);
             assert!(filesystem
                 .r#mod(
                     [tag("foo")].into_iter().collect(),
                     [].into_iter().collect(),
-                    [path].into_iter().collect()
+                    [name("bar")].into_iter().collect()
                 )
                 .is_err());
         })
@@ -351,13 +334,12 @@ mod tests {
     #[test]
     fn mod_returns_error_if_file_lacks_tag() {
         with_tempdir(|| {
-            let path = TaggedPath::new("_bar".to_owned()).unwrap();
-            let filesystem = tagged_filesystem_with([&path]);
+            let filesystem = tagged_filesystem_with(["_bar"]);
             assert!(filesystem
                 .r#mod(
                     [].into_iter().collect(),
                     [tag("foo")].into_iter().collect(),
-                    [path].into_iter().collect()
+                    [name("bar")].into_iter().collect()
                 )
                 .is_err());
         })
@@ -371,9 +353,7 @@ mod tests {
                 .r#mod(
                     [tag("bar")].into_iter().collect(),
                     [tag("foo")].into_iter().collect(),
-                    [TaggedPath::new("foo-_baz".to_owned()).unwrap()]
-                        .into_iter()
-                        .collect()
+                    [name("baz")].into_iter().collect()
                 )
                 .is_err());
         })
