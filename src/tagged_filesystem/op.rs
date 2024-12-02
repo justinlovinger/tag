@@ -140,7 +140,7 @@ impl TaggedFilesystem {
                 Op::Move(MoveOp { from, to }) => {
                     // This utility should only organize data,
                     // never delete it.
-                    if to.is_file() {
+                    if to.try_exists()? {
                         Err(std::io::Error::new(
                             std::io::ErrorKind::AlreadyExists,
                             format!(
