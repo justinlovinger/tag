@@ -22,8 +22,7 @@ use crate::{
     fs::{copy_dir, symlink_dir, symlink_file},
     organize::organize,
     tagged_path::TaggedPathError,
-    Name, NameRef, Root, Tag, TagRef, TaggedPath, FILES_DIR, METADATA_DIR, PROGRAM_TAGS_DIR,
-    TAGS_DIR,
+    Name, NameRef, Root, Tag, TaggedPath, FILES_DIR, METADATA_DIR, PROGRAM_TAGS_DIR, TAGS_DIR,
 };
 
 pub use self::errors::*;
@@ -173,16 +172,6 @@ impl TaggedFilesystem {
             })
         }
     }
-}
-
-fn unique_tags(tags: impl IntoIterator<Item = Tag>) -> Result<FxHashSet<Tag>, NonUniqueTagError> {
-    let mut tag_set = FxHashSet::default();
-    for tag in tags.into_iter() {
-        if !tag_set.insert(tag) {
-            return Err(NonUniqueTagError);
-        }
-    }
-    Ok(tag_set)
 }
 
 fn relevant_paths(mut tags: FxHashSet<Tag>, mut paths: Vec<TaggedPath>) -> Vec<TaggedPath> {

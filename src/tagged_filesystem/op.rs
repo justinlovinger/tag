@@ -141,14 +141,18 @@ impl TaggedFilesystem {
                     // This utility should only organize data,
                     // never delete it.
                     if to.try_exists()? {
-                        Err(std::io::Error::new(
-                            std::io::ErrorKind::AlreadyExists,
-                            format!(
-                                "cannot move `{}` to `{}`, destination already exists",
-                                from.display(),
-                                to.display()
-                            ),
-                        ))
+                        if to == from {
+                            Ok(())
+                        } else {
+                            Err(std::io::Error::new(
+                                std::io::ErrorKind::AlreadyExists,
+                                format!(
+                                    "cannot move `{}` to `{}`, destination already exists",
+                                    from.display(),
+                                    to.display()
+                                ),
+                            ))
+                        }
                     } else {
                         rename(from, to)
                     }

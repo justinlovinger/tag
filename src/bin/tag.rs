@@ -119,6 +119,8 @@ enum Commands {
         files: Vec<PathOrName>,
     },
     /// Add and delete tags from files and print new tagged paths
+    ///
+    /// Adding tags takes precedence over deleting.
     Mod {
         /// Tags to add
         #[clap(short, long, value_name = "TAG")]

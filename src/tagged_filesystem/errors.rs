@@ -18,36 +18,6 @@ pub struct NoMetadataExistsError;
 #[error("Metadata for this name already exists. An error may have previously occured. Please move `{0}` or run `tag build`.")]
 pub struct MetadataExistsError(pub(crate) PathBuf);
 
-#[derive(Debug, PartialEq, thiserror::Error)]
-#[error("`{0}` already has `{1}`")]
-pub struct HasTagError(TaggedPath, String);
-
-impl HasTagError {
-    pub(crate) fn new<T>(path: TaggedPath, tag: T) -> Self
-    where
-        T: AsRef<TagRef>,
-    {
-        Self(path, tag.as_ref().to_string())
-    }
-}
-
-#[derive(Debug, PartialEq, thiserror::Error)]
-#[error("`{0}` lacks `{1}`")]
-pub struct LacksTagError(TaggedPath, String);
-
-impl LacksTagError {
-    pub(crate) fn new<T>(path: TaggedPath, tag: T) -> Self
-    where
-        T: AsRef<TagRef>,
-    {
-        Self(path, tag.as_ref().to_string())
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("Tag is not unique")]
-pub struct NonUniqueTagError;
-
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub enum TagsError {

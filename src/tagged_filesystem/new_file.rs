@@ -5,7 +5,6 @@ use super::*;
 pub enum NewFileError {
     FileExists(#[from] FileExistsError),
     MetadataExists(#[from] MetadataExistsError),
-    NonUniqueTag(#[from] NonUniqueTagError),
     New(#[from] TaggedPathError),
     Filesystem(#[from] std::io::Error),
 }
@@ -49,7 +48,7 @@ impl TaggedFilesystem {
             return Err(MetadataExistsError(file_tags_path).into());
         }
 
-        let tag_set = unique_tags(tags)?;
+        let tag_set = tags.into_iter().collect();
         let tagged_path = TaggedPath::from_tags(&tag_set, name);
 
         create_dir(&file_tags_path)?;
@@ -216,20 +215,6 @@ mod tests {
     }
 
     #[test]
-    fn touch_errors_if_tags_are_not_unique() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem();
-            assert!(filesystem
-                .touch([tag("foo"), tag("foo")], name("bar"))
-                .is_err());
-            assert_eq!(
-                list_files(&filesystem.root),
-                [".tag/files", ".tag/tags"].map(PathBuf::from)
-            );
-        })
-    }
-
-    #[test]
     fn mkdir_creates_an_empty_directory_with_metadata_and_a_link_if_name_is_unique() {
         with_tempdir(|| {
             let filesystem = tagged_filesystem();
@@ -331,20 +316,6 @@ mod tests {
             assert_eq!(
                 list_files(&filesystem.root),
                 [".tag/files", ".tag/tags/bar"].map(PathBuf::from)
-            );
-        })
-    }
-
-    #[test]
-    fn mkdir_errors_if_tags_are_not_unique() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem();
-            assert!(filesystem
-                .mkdir([tag("foo"), tag("foo")], name("bar"))
-                .is_err());
-            assert_eq!(
-                list_files(&filesystem.root),
-                [".tag/files", ".tag/tags"].map(PathBuf::from)
             );
         })
     }

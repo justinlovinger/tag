@@ -3,8 +3,6 @@ use super::*;
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub enum ModError {
-    HasTag(#[from] HasTagError),
-    LacksTag(#[from] LacksTagError),
     Filesystem(#[from] std::io::Error),
 }
 
@@ -28,9 +26,6 @@ impl TaggedFilesystem {
         }
 
         for name in &names {
-            for tag in &add {
-                File::create(self.root.tag(name, tag))?;
-            }
             for tag in &del {
                 if let Err(e) = remove_file(self.root.tag(name, tag)) {
                     // The tag not existing is fine.
@@ -40,12 +35,15 @@ impl TaggedFilesystem {
                     }
                 }
             }
+            for tag in &add {
+                File::create(self.root.tag(name, tag))?;
+            }
         }
 
         let (paths, other_paths) = self
             .tagged_paths()
             .partition::<Vec<_>, _>(|path| names.contains(path.name()));
-        let mut relevant_other_paths = relevant_paths(
+        let mut relevant_paths = relevant_paths(
             paths
                 .iter()
                 .flat_map(|path| path.tags().map(|tag| tag.to_owned()))
@@ -54,48 +52,27 @@ impl TaggedFilesystem {
             other_paths,
         );
 
-        let mut move_ops = Vec::new();
+        let mut mod_move_ops = Vec::new();
         for path in paths {
-            for tag in path.tags() {
-                if add.contains(tag) {
-                    return Err(HasTagError::new(path.clone(), tag).into());
-                }
-            }
-
-            let mut deleted_count = 0;
             let new_path = TaggedPath::from_tags(
                 &path
                     .tags()
-                    .filter(|tag| {
-                        if del.contains(*tag) {
-                            deleted_count += 1;
-                            false
-                        } else {
-                            true
-                        }
-                    })
+                    .filter(|tag| !del.contains(*tag))
                     .chain(add.iter().map(|tag| tag.as_ref()))
                     .collect(),
                 path.name(),
             );
-            if deleted_count != del.len() {
-                let mut del = del;
-                for tag in path.tags() {
-                    del.remove(tag);
-                }
-                return Err(LacksTagError::new(path, del.into_iter().next().unwrap()).into());
-            }
 
-            move_ops.push(MoveOp {
+            mod_move_ops.push(MoveOp {
                 from: path.into_path(),
                 to: new_path.as_path().to_owned(),
             });
-            relevant_other_paths.push(new_path);
+            relevant_paths.push(new_path);
         }
 
-        let mut organized_move_ops = organize(&relevant_other_paths);
+        let mut organized_move_ops = organize(&relevant_paths);
         let mut new_paths = Vec::new();
-        for op in move_ops {
+        for op in mod_move_ops {
             match organized_move_ops
                 .iter_mut()
                 .find(|other| other.from == op.to)
@@ -119,6 +96,8 @@ impl TaggedFilesystem {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use proptest::prelude::*;
     use test_strategy::proptest;
 
@@ -283,27 +262,23 @@ mod tests {
     }
 
     #[proptest(cases = 20)]
-    fn mod_builds(paths: TaggedPaths, path: TaggedPath, tag_to_add: Tag, tag_to_del: Tag) {
-        prop_assume!(tag_to_add != tag_to_del);
-
+    fn mod_builds(
+        paths: TaggedPaths,
+        paths_to_mod: TaggedPaths,
+        tags_to_add: HashSet<Tag>,
+        tags_to_del: HashSet<Tag>,
+    ) {
         let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths);
+            let filesystem = tagged_filesystem_with(paths.iter().chain(&paths_to_mod));
 
-            filesystem
-                .touch(
-                    path.tags()
-                        .filter(|path_tag| path_tag != &tag_to_add.as_ref())
-                        .filter(|path_tag| path_tag != &tag_to_del.as_ref())
-                        .map(|x| x.to_owned())
-                        .chain([tag_to_del.clone()]),
-                    path.name().to_owned(),
-                )
-                .unwrap();
             filesystem
                 .r#mod(
-                    [tag_to_add].into_iter().collect(),
-                    [tag_to_del].into_iter().collect(),
-                    [path.name().to_owned()].into_iter().collect(),
+                    tags_to_add.into_iter().collect(),
+                    tags_to_del.into_iter().collect(),
+                    paths_to_mod
+                        .into_iter()
+                        .map(|path| path.name().to_owned())
+                        .collect(),
                 )
                 .unwrap();
             let actual = list_files(&filesystem.root);
@@ -317,32 +292,41 @@ mod tests {
         prop_assert_eq!(actual, expected)
     }
 
-    #[test]
-    fn mod_returns_error_if_file_already_has_tag() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(["foo-_bar"]);
-            assert!(filesystem
-                .r#mod(
-                    [tag("foo")].into_iter().collect(),
-                    [].into_iter().collect(),
-                    [name("bar")].into_iter().collect()
-                )
-                .is_err());
-        })
-    }
+    #[proptest(cases = 20)]
+    fn mod_is_idempotent(
+        paths: TaggedPaths,
+        paths_to_mod: TaggedPaths,
+        tags_to_add: HashSet<Tag>,
+        tags_to_del: HashSet<Tag>,
+    ) {
+        let tags_to_add = tags_to_add.into_iter().collect::<FxHashSet<_>>();
+        let tags_to_del = tags_to_del.into_iter().collect::<FxHashSet<_>>();
+        let names_to_mod = paths_to_mod
+            .iter()
+            .map(|path| path.name().to_owned())
+            .collect::<FxHashSet<_>>();
 
-    #[test]
-    fn mod_returns_error_if_file_lacks_tag() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(["_bar"]);
-            assert!(filesystem
+        let (actual, expected) = with_tempdir(|| {
+            let filesystem = tagged_filesystem_with(paths.iter().chain(&paths_to_mod));
+
+            filesystem
                 .r#mod(
-                    [].into_iter().collect(),
-                    [tag("foo")].into_iter().collect(),
-                    [name("bar")].into_iter().collect()
+                    tags_to_add.clone(),
+                    tags_to_del.clone(),
+                    names_to_mod.clone(),
                 )
-                .is_err());
-        })
+                .unwrap();
+            let expected = list_files(&filesystem.root);
+
+            filesystem
+                .r#mod(tags_to_add, tags_to_del, names_to_mod)
+                .unwrap();
+            let actual = list_files(filesystem.root);
+
+            (actual, expected)
+        });
+
+        prop_assert_eq!(actual, expected)
     }
 
     #[test]
