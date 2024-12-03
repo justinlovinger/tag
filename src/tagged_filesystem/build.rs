@@ -1,53 +1,56 @@
+use crate::{name::NameError, tag::TagError};
+
 use super::*;
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub enum BuildError {
+    Names(#[from] NamesError),
     Tags(#[from] TagsError),
     Filesystem(#[from] std::io::Error),
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub enum NamesError {
+    InvalidString(#[from] StringFromPathError),
+    InvalidName(#[from] NameFromPathError),
+    Filesystem(#[from] std::io::Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub enum TagsError {
+    InvalidString(#[from] StringFromPathError),
+    InvalidTag(#[from] TagFromPathError),
+    Filesystem(#[from] std::io::Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0}. Name is from `{1}`.")]
+pub struct NameFromPathError(NameError, PathBuf);
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0}. Tag is from `{1}`.")]
+pub struct TagFromPathError(TagError, PathBuf);
+
+#[derive(Debug, thiserror::Error)]
+#[error("`{0}` is not a valid Unicode string")]
+pub struct StringFromPathError(PathBuf);
+
 impl TaggedFilesystem {
     pub fn build(&self) -> Result<(), BuildError> {
-        let names = std::fs::read_dir(self.root.files())?
-            .map(|entry| {
-                entry.map(|entry| {
-                    Name::new(
-                        entry
-                            .file_name()
-                            .into_string()
-                            .expect("file name should be a valid Unicode string"),
-                    )
-                    .expect("file name should be a valid name")
-                })
-            })
-            .collect::<std::io::Result<FxHashSet<_>>>()?;
+        let names = self.names(self.root.files())?;
+        let tag_names = self.names(self.root.tags())?;
 
-        let tag_directories = {
-            let mut tag_directories = [].into_iter().collect::<FxHashSet<_>>();
-            for name in std::fs::read_dir(self.root.tags())?.map(|entry| {
-                entry.map(|entry| {
-                    Name::new(
-                        entry
-                            .file_name()
-                            .into_string()
-                            .expect("tag-directory should be a valid Unicode string"),
-                    )
-                    .expect("tag-directory should be a valid name")
-                })
-            }) {
-                let name = name?;
-                if !names.contains(&name) {
-                    remove_dir_all(self.root.file_tags(name))?;
-                } else {
-                    tag_directories.insert(name);
-                }
+        for name in &tag_names {
+            if !names.contains(name) {
+                remove_dir_all(self.root.file_tags(name))?;
             }
-            tag_directories
-        };
+        }
 
         for name in &names {
-            if !tag_directories.contains(name) {
+            if !tag_names.contains(name) {
                 create_dir(self.root.file_tags(name))?;
                 create_dir(self.root.program_tags(name))?;
             } else {
@@ -172,6 +175,50 @@ impl TaggedFilesystem {
         }
 
         Ok(())
+    }
+
+    fn names<P>(&self, dir: P) -> Result<FxHashSet<Name>, NamesError>
+    where
+        P: AsRef<Path>,
+    {
+        let mut names = FxHashSet::default();
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            match entry.file_name().into_string() {
+                Ok(s) => match Name::new(s) {
+                    Ok(name) => {
+                        names.insert(name);
+                    }
+                    Err(e) => return Err(NameFromPathError(e, entry.path()).into()),
+                },
+                Err(_) => return Err(StringFromPathError(entry.path()).into()),
+            }
+        }
+        Ok(names)
+    }
+
+    fn tags<N>(&self, name: N) -> Result<FxHashSet<Tag>, TagsError>
+    where
+        N: AsRef<NameRef>,
+    {
+        let mut tags = FxHashSet::default();
+        for namespace in read_paths(self.root.file_tags(name))? {
+            for entry in std::fs::read_dir(namespace)? {
+                let entry = entry?;
+                match entry.file_name().into_string() {
+                    Ok(s) => match Tag::new(s) {
+                        Ok(tag) => {
+                            tags.insert(tag);
+                        }
+                        Err(e) => return Err(TagFromPathError(e, entry.path()).into()),
+                    },
+                    Err(_) => {
+                        return Err(StringFromPathError(entry.path()).into());
+                    }
+                }
+            }
+        }
+        Ok(tags)
     }
 }
 

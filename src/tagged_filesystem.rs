@@ -59,30 +59,6 @@ impl TaggedFilesystem {
         }
     }
 
-    fn tags<N>(&self, name: N) -> Result<FxHashSet<Tag>, TagsError>
-    where
-        N: AsRef<NameRef>,
-    {
-        let mut tags = FxHashSet::default();
-        for namespace in read_paths(self.root.file_tags(name))? {
-            for entry in std::fs::read_dir(namespace)? {
-                let entry = entry?;
-                match entry.file_name().into_string() {
-                    Ok(s) => match Tag::new(s) {
-                        Ok(tag) => {
-                            tags.insert(tag);
-                        }
-                        Err(e) => return Err(TagFromPathError(e, entry.path()).into()),
-                    },
-                    Err(_) => {
-                        return Err(StringFromPathError(entry.path()).into());
-                    }
-                }
-            }
-        }
-        Ok(tags)
-    }
-
     fn tagged_paths(&self) -> impl Iterator<Item = TaggedPath> {
         let (sender, receiver) = crossbeam_channel::unbounded();
         self.for_each_tagged_path(move |path| sender.send(path).unwrap());
