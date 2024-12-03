@@ -43,136 +43,9 @@ impl TaggedFilesystem {
         let names = self.names(self.root.files())?;
         let tag_names = self.names(self.root.tags())?;
 
-        for name in &tag_names {
-            if !names.contains(name) {
-                remove_dir_all(self.root.file_tags(name))?;
-            }
-        }
+        self.clean_tag_directories(&names, &tag_names)?;
 
-        for name in &names {
-            if !tag_names.contains(name) {
-                create_dir(self.root.file_tags(name))?;
-                create_dir(self.root.program_tags(name))?;
-            } else {
-                let program_tags = self.root.program_tags(name);
-                if !program_tags.try_exists()? {
-                    create_dir(program_tags)?;
-                }
-            }
-        }
-
-        let (mut tagged_paths, path_names, del_move_ops) = {
-            let mut tagged_paths = self.tagged_paths().collect_vec();
-            let mut path_names = FxHashSet::default();
-            let mut removed = Vec::new();
-            for (i, path) in tagged_paths.iter().enumerate() {
-                if !names.contains(path.name()) || !path_names.insert(path.name().to_owned()) {
-                    remove_file(path)?;
-                    removed.push(i);
-                }
-            }
-            // We can use fake move-ops to generate `DeleteDirectoryIfEmpty` ops.
-            // A real move-op will never have an empty `to`.
-            let fake_move_ops = removed
-                .into_iter()
-                .rev()
-                .map(|i| {
-                    let path = tagged_paths.swap_remove(i);
-                    MoveOp {
-                        from: path.into_path(),
-                        to: PathBuf::new(),
-                    }
-                })
-                .collect_vec();
-            (tagged_paths, path_names, fake_move_ops)
-        };
-
-        let new_paths = {
-            let mut new_paths = Vec::new();
-            for name in &names {
-                if !path_names.contains(name) {
-                    new_paths.push(TaggedPath::from_tags(&self.tags(name)?, name));
-                }
-            }
-            new_paths
-        };
-
-        let mut modified_paths_to_from = {
-            let mut modified_paths_to_from = FxHashMap::default();
-            for path in &mut tagged_paths {
-                let tags = self.tags(path.name())?;
-                let path_tags = path.tags().map(|tag| tag.to_owned()).collect();
-                if tags != path_tags {
-                    let original_path = path.as_path().to_path_buf();
-                    *path = TaggedPath::from_tags(&tags, path.name());
-                    modified_paths_to_from.insert(path.as_path().to_path_buf(), original_path);
-                }
-            }
-            modified_paths_to_from
-        };
-
-        tagged_paths.extend(new_paths.iter().cloned());
-        let mut move_ops = organize(&tagged_paths);
-
-        for move_op in &mut move_ops {
-            if let Some(from) = modified_paths_to_from.remove(&move_op.from) {
-                move_op.from = from;
-            }
-        }
-        move_ops.extend(
-            modified_paths_to_from
-                .into_iter()
-                .map(|(to, from)| MoveOp { from, to }),
-        );
-
-        let ops = from_move_ops(move_ops.into_iter().chain(del_move_ops).collect())
-            // Move-ops with no target are fake,
-            // and should be removed.
-            .filter(|op| match op {
-                Op::EnsureDirectory(_) => true,
-                Op::Move(MoveOp { from: _, to }) => to != &PathBuf::new(),
-                Op::DeleteDirectoryIfEmpty(_) => true,
-            });
-
-        // New paths cannot be moved,
-        // we will create them directly instead.
-        let (ops, new_paths) = {
-            let mut unmoved_new_paths = new_paths
-                .into_iter()
-                .map(|path| path.into_path())
-                .collect::<FxHashSet<_>>();
-            let mut new_paths = Vec::new();
-            let ops = ops
-                .filter(|op| match op {
-                    Op::EnsureDirectory(_) => true,
-                    Op::Move(MoveOp { from, to }) => {
-                        if unmoved_new_paths.remove(from) {
-                            new_paths.push(to.clone());
-                            false
-                        } else {
-                            true
-                        }
-                    }
-                    Op::DeleteDirectoryIfEmpty(_) => true,
-                })
-                .collect_vec();
-            new_paths.extend(unmoved_new_paths);
-            (ops, new_paths)
-        };
-
-        self.apply_all(ops)?;
-
-        for path in new_paths
-            .into_iter()
-            .map(|path| TaggedPath::from_path(path).unwrap())
-        {
-            let file_path = self.root.file(path.name());
-            if file_path.is_dir() {
-                symlink_dir(file_path, path)?;
-            } else {
-                symlink_file(file_path, path)?;
-            }
-        }
+        self.clean_tagged_paths(&names)?;
 
         Ok(())
     }
@@ -220,6 +93,193 @@ impl TaggedFilesystem {
         }
         Ok(tags)
     }
+
+    fn clean_tag_directories(
+        &self,
+        names: &FxHashSet<Name>,
+        tag_names: &FxHashSet<Name>,
+    ) -> Result<(), BuildError> {
+        self.remove_tag_directories(names, tag_names)?;
+        self.create_tag_directories(names, tag_names)?;
+        Ok(())
+    }
+
+    fn remove_tag_directories(
+        &self,
+        names: &FxHashSet<Name>,
+        tag_names: &FxHashSet<Name>,
+    ) -> Result<(), BuildError> {
+        for name in tag_names {
+            if !names.contains(name) {
+                remove_dir_all(self.root.file_tags(name))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn create_tag_directories(
+        &self,
+        names: &FxHashSet<Name>,
+        tag_names: &FxHashSet<Name>,
+    ) -> Result<(), BuildError> {
+        for name in names {
+            if !tag_names.contains(name) {
+                create_dir(self.root.file_tags(name))?;
+                create_dir(self.root.program_tags(name))?;
+            } else {
+                let program_tags = self.root.program_tags(name);
+                if !program_tags.try_exists()? {
+                    create_dir(program_tags)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn clean_tagged_paths(&self, names: &FxHashSet<Name>) -> Result<(), BuildError> {
+        let (paths, excluded_paths, modified_paths, new_paths) = self.build_paths(names)?;
+        let move_ops = build_move_ops(paths, modified_paths);
+        let (ops, new_paths) = build_ops(move_ops, &excluded_paths, new_paths);
+        self.apply_build(ops, excluded_paths, new_paths)?;
+        Ok(())
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn build_paths(
+        &self,
+        names: &FxHashSet<Name>,
+    ) -> Result<
+        (
+            Vec<TaggedPath>,
+            Vec<TaggedPath>,
+            FxHashMap<PathBuf, PathBuf>,
+            FxHashSet<PathBuf>,
+        ),
+        BuildError,
+    > {
+        let mut path_names = FxHashSet::default();
+        let (excluded_paths, mut paths) = self.tagged_paths().partition::<Vec<_>, _>(|path| {
+            !names.contains(path.name()) || !path_names.insert(path.name().to_owned())
+        });
+
+        let mut modified_paths = FxHashMap::default();
+        for path in &mut paths {
+            let tags = self.tags(path.name())?;
+            let path_tags = path.tags().map(|tag| tag.to_owned()).collect();
+            if tags != path_tags {
+                let original_path = path.as_path().to_owned();
+                *path = TaggedPath::from_tags(&tags, path.name());
+                modified_paths.insert(path.as_path().to_owned(), original_path);
+            }
+        }
+
+        let mut new_paths = FxHashSet::default();
+        for name in names {
+            if !path_names.contains(name) {
+                let path = TaggedPath::from_tags(&self.tags(name)?, name);
+                new_paths.insert(path.as_path().to_owned());
+                paths.push(path);
+            }
+        }
+
+        Ok((paths, excluded_paths, modified_paths, new_paths))
+    }
+
+    fn apply_build(
+        &self,
+        ops: impl IntoIterator<Item = Op>,
+        excluded_paths: impl IntoIterator<Item = TaggedPath>,
+        new_paths: impl IntoIterator<Item = PathBuf>,
+    ) -> std::io::Result<()> {
+        for path in excluded_paths {
+            remove_file(self.root.join(path))?
+        }
+
+        self.apply_all(ops)?;
+
+        for path in new_paths
+            .into_iter()
+            .map(|path| TaggedPath::from_path(path).unwrap())
+        {
+            let file_path = self.root.file(path.name());
+            let link_path = self.root.join(path);
+            if file_path.is_dir() {
+                symlink_dir(file_path, link_path)?;
+            } else {
+                symlink_file(file_path, link_path)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn build_move_ops(
+    paths: Vec<TaggedPath>,
+    mut modified_paths: FxHashMap<PathBuf, PathBuf>,
+) -> Vec<MoveOp> {
+    let mut move_ops = organize(&paths);
+    for move_op in &mut move_ops {
+        if let Some(original_path) = modified_paths.remove(&move_op.from) {
+            move_op.from = original_path;
+        }
+    }
+    move_ops.extend(
+        modified_paths
+            .into_iter()
+            .map(|(to, from)| MoveOp { from, to }),
+    );
+    move_ops
+}
+
+fn build_ops<'a>(
+    move_ops: impl IntoIterator<Item = MoveOp>,
+    excluded_paths: impl IntoIterator<Item = &'a TaggedPath>,
+    new_paths: FxHashSet<PathBuf>,
+) -> (Vec<Op>, Vec<PathBuf>) {
+    let ops = from_move_ops(
+        move_ops
+            .into_iter()
+            // We can use fake move-ops to generate `DeleteDirectoryIfEmpty` ops.
+            // A real move-op will never have an empty `to`.
+            .chain(excluded_paths.into_iter().map(|path| MoveOp {
+                from: path.as_path().to_owned(),
+                to: PathBuf::new(),
+            }))
+            .collect(),
+    )
+    // Move-ops with no target are fake,
+    // and should be removed.
+    .filter(|op| match op {
+        Op::EnsureDirectory(_) => true,
+        Op::Move(MoveOp { from: _, to }) => to != &PathBuf::new(),
+        Op::DeleteDirectoryIfEmpty(_) => true,
+    });
+
+    // New paths cannot be moved,
+    // we will create them directly instead.
+    let (ops, new_paths) = {
+        let mut unmoved_new_paths = new_paths;
+        let mut new_paths = Vec::new();
+        let ops = ops
+            .filter(|op| match op {
+                Op::EnsureDirectory(_) => true,
+                Op::Move(MoveOp { from, to }) => {
+                    if unmoved_new_paths.remove(from) {
+                        new_paths.push(to.clone());
+                        false
+                    } else {
+                        true
+                    }
+                }
+                Op::DeleteDirectoryIfEmpty(_) => true,
+            })
+            .collect_vec();
+        new_paths.extend(unmoved_new_paths);
+        (ops, new_paths)
+    };
+
+    (ops, new_paths)
 }
 
 #[cfg(test)]
