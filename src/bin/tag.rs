@@ -13,14 +13,6 @@ use tag::{Name, Tag, TaggedFilesystem, TaggedFilesystemBuilder, TaggedPath};
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    /// Make no changes to the filesystem
-    #[arg(long)]
-    dry_run: bool,
-
-    /// Print operations taken by the program
-    #[arg(short, long)]
-    verbose: bool,
-
     /// Use given path as working directory
     ///
     /// All other paths will be resolved
@@ -193,8 +185,6 @@ fn main() -> anyhow::Result<()> {
         TaggedFilesystem::init()?;
     } else {
         let filesystem = TaggedFilesystemBuilder::new(current_dir()?)
-            .dry_run(args.dry_run)
-            .verbose(args.verbose)
             .build()?
             .expect("The working directory is not tagged. Please run `tag init` to initialize.");
         match args.command {

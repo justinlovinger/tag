@@ -73,10 +73,6 @@ impl TaggedFilesystem {
         let ops = self.canonicalize_all(ops).collect_vec();
 
         if let Err(e) = self.apply_all_(&ops) {
-            if self.verbose {
-                println!("Error occured: {e}");
-                println!("Cleaning up");
-            }
             ops.into_iter()
                 .filter_map(|op| match op {
                     Op::EnsureDirectory(path) => Some(Op::DeleteDirectoryIfEmpty(path)),
@@ -120,63 +116,45 @@ impl TaggedFilesystem {
     }
 
     fn apply_(&self, op: &Op) -> std::io::Result<()> {
-        if self.verbose {
-            match op {
-                Op::EnsureDirectory(path) => {
-                    println!("Ensuring directory `{}` exists", path.display());
-                }
-                Op::Move(MoveOp { from, to }) => {
-                    println!("Moving `{}` to `{}`", from.display(), to.display());
-                }
-                Op::DeleteDirectoryIfEmpty(path) => {
-                    println!("Deleting directory `{}` if empty", path.display());
-                }
-            }
-        }
-
-        if !self.dry_run {
-            match op {
-                Op::EnsureDirectory(path) => create_dir_all(path),
-                Op::Move(MoveOp { from, to }) => {
-                    // This utility should only organize data,
-                    // never delete it.
-                    if to.try_exists()? {
-                        if to == from {
-                            Ok(())
-                        } else {
-                            Err(std::io::Error::new(
-                                std::io::ErrorKind::AlreadyExists,
-                                format!(
-                                    "cannot move `{}` to `{}`, destination already exists",
-                                    from.display(),
-                                    to.display()
-                                ),
-                            ))
-                        }
-                    } else {
-                        rename(from, to)
-                    }
-                }
-                Op::DeleteDirectoryIfEmpty(path) => {
-                    // Note,
-                    // we can do the following with nightly Rust,
-                    // which may be more efficient than `self.fs.read_dir(&path)?.next().is_none()`:
-                    // ```
-                    // if let Err(e) = self.fs.remove_dir(path) {
-                    //     if e.kind() != std::io::ErrorKind::DirectoryNotEmpty {
-                    //         return Err(e);
-                    //     }
-                    // }
-                    // ```
-                    if std::fs::read_dir(path)?.next().is_none() {
-                        remove_dir(path)
-                    } else {
+        match op {
+            Op::EnsureDirectory(path) => create_dir_all(path),
+            Op::Move(MoveOp { from, to }) => {
+                // This utility should only organize data,
+                // never delete it.
+                if to.try_exists()? {
+                    if to == from {
                         Ok(())
+                    } else {
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::AlreadyExists,
+                            format!(
+                                "cannot move `{}` to `{}`, destination already exists",
+                                from.display(),
+                                to.display()
+                            ),
+                        ))
                     }
+                } else {
+                    rename(from, to)
                 }
             }
-        } else {
-            Ok(())
+            Op::DeleteDirectoryIfEmpty(path) => {
+                // Note,
+                // we can do the following with nightly Rust,
+                // which may be more efficient than `self.fs.read_dir(&path)?.next().is_none()`:
+                // ```
+                // if let Err(e) = self.fs.remove_dir(path) {
+                //     if e.kind() != std::io::ErrorKind::DirectoryNotEmpty {
+                //         return Err(e);
+                //     }
+                // }
+                // ```
+                if std::fs::read_dir(path)?.next().is_none() {
+                    remove_dir(path)
+                } else {
+                    Ok(())
+                }
+            }
         }
     }
 }

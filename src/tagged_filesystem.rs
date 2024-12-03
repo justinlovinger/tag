@@ -31,55 +31,29 @@ pub(crate) use self::op::*;
 #[derive(Debug)]
 pub struct TaggedFilesystemBuilder {
     root: PathBuf,
-    dry_run: bool,
-    verbose: bool,
 }
 
 #[derive(Debug)]
 pub struct TaggedFilesystem {
     root: Root,
-    dry_run: bool,
-    verbose: bool,
 }
 
 impl TaggedFilesystemBuilder {
     #[allow(clippy::new_without_default)]
     pub fn new(root: PathBuf) -> Self {
-        Self {
-            root,
-            dry_run: false,
-            verbose: false,
-        }
-    }
-
-    pub fn dry_run(mut self, value: bool) -> Self {
-        self.dry_run = value;
-        self
-    }
-
-    pub fn verbose(mut self, value: bool) -> Self {
-        self.verbose = value;
-        self
+        Self { root }
     }
 
     pub fn build(self) -> std::io::Result<Option<TaggedFilesystem>> {
-        TaggedFilesystem::new(self.root, self.dry_run, self.verbose)
+        TaggedFilesystem::new(self.root)
     }
 }
 
 impl TaggedFilesystem {
     #[allow(clippy::new_without_default)]
-    pub fn new(
-        root: PathBuf,
-        dry_run: bool,
-        verbose: bool,
-    ) -> std::io::Result<Option<TaggedFilesystem>> {
+    pub fn new(root: PathBuf) -> std::io::Result<Option<TaggedFilesystem>> {
         if let Some(root) = Root::from_child(root)? {
-            Ok(Some(Self {
-                root,
-                dry_run,
-                verbose,
-            }))
+            Ok(Some(Self { root }))
         } else {
             Ok(None)
         }
