@@ -26,20 +26,24 @@ pub enum InitError {
 impl TaggedFilesystem {
     #[allow(clippy::new_without_default)]
 
-    pub fn init() -> Result<Self, InitError> {
-        if PathBuf::from(METADATA_DIR).is_dir() {
+    pub fn init<P>(dir: P) -> Result<Self, InitError>
+    where
+        P: AsRef<Path>,
+    {
+        let dir = dir.as_ref();
+        if dir.join(METADATA_DIR).is_dir() {
             Err(InitError::AlreadyTagged)
-        } else if PathBuf::from(METADATA_DIR).is_file() {
+        } else if dir.join(METADATA_DIR).is_file() {
             Err(InitError::FileExists)
-        } else if let Some(root) = Root::from_child(current_dir()?)? {
+        } else if let Some(root) = Root::from_child(dir)? {
             Err(InitError::InTagged(root.into_path()))
-        } else if std::fs::read_dir(".")?.next().is_some() {
+        } else if std::fs::read_dir(dir)?.next().is_some() {
             Err(InitError::NotEmpty)
         } else {
-            create_dir(METADATA_DIR)?;
-            create_dir(PathBuf::from(METADATA_DIR).join(FILES_DIR))?;
-            create_dir(PathBuf::from(METADATA_DIR).join(TAGS_DIR))?;
-            Ok(TaggedFilesystemBuilder::new(current_dir()?)
+            create_dir(dir.join(METADATA_DIR))?;
+            create_dir(dir.join(METADATA_DIR).join(FILES_DIR))?;
+            create_dir(dir.join(METADATA_DIR).join(TAGS_DIR))?;
+            Ok(TaggedFilesystemBuilder::new(dir.to_owned())
                 .build()?
                 .unwrap())
         }
@@ -48,19 +52,19 @@ impl TaggedFilesystem {
 
 #[cfg(test)]
 mod tests {
-    use std::{env::set_current_dir, fs::File};
+    use std::fs::File;
 
     use crate::{
         tagged_filesystem::tests::list_files,
-        testing::{name, tag, tagged_filesystem_with, with_tempdir},
+        testing::{name, tag, tagged_filesystem_with, with_temp_dir},
     };
 
     use super::*;
 
     #[test]
     fn init_initializes_an_empty_directory() {
-        with_tempdir(|| {
-            let filesystem = TaggedFilesystem::init().unwrap();
+        with_temp_dir(|dir| {
+            let filesystem = TaggedFilesystem::init(dir).unwrap();
             assert_eq!(
                 list_files(filesystem.root),
                 [".tag/files", ".tag/tags"].map(PathBuf::from)
@@ -70,11 +74,10 @@ mod tests {
 
     #[test]
     fn init_initializes_a_nested_tagged_filesystem_from_files_dir() {
-        with_tempdir(|| {
-            let filesystem = TaggedFilesystem::init().unwrap();
+        with_temp_dir(|dir| {
+            let filesystem = TaggedFilesystem::init(dir).unwrap();
             filesystem.mkdir([tag("foo")], name("bar")).unwrap();
-            set_current_dir(".tag/files/bar").unwrap();
-            assert!(TaggedFilesystem::init().is_ok());
+            assert!(TaggedFilesystem::init(filesystem.root.file(name("bar"))).is_ok());
             assert_eq!(
                 list_files(filesystem.root),
                 [
@@ -91,11 +94,10 @@ mod tests {
 
     #[test]
     fn init_initializes_a_nested_tagged_filesystem_from_tagged_path() {
-        with_tempdir(|| {
-            let filesystem = TaggedFilesystem::init().unwrap();
+        with_temp_dir(|dir| {
+            let filesystem = TaggedFilesystem::init(dir).unwrap();
             filesystem.mkdir([tag("foo")], name("bar")).unwrap();
-            set_current_dir("foo-_bar").unwrap();
-            assert!(TaggedFilesystem::init().is_ok());
+            assert!(TaggedFilesystem::init(filesystem.root.join("foo-_bar")).is_ok());
             assert_eq!(
                 list_files(filesystem.root),
                 [
@@ -112,9 +114,9 @@ mod tests {
 
     #[test]
     fn init_errors_on_already_initialized_directory() {
-        with_tempdir(|| {
-            let filesystem = TaggedFilesystem::init().unwrap();
-            assert!(TaggedFilesystem::init().is_err());
+        with_temp_dir(|dir| {
+            let filesystem = TaggedFilesystem::init(dir).unwrap();
+            assert!(TaggedFilesystem::init(dir).is_err());
             assert_eq!(
                 list_files(filesystem.root),
                 [".tag/files", ".tag/tags"].map(PathBuf::from)
@@ -124,25 +126,24 @@ mod tests {
 
     #[test]
     fn init_errors_on_directory_with_dot_tag_file() {
-        with_tempdir(|| {
-            File::create(METADATA_DIR).unwrap();
-            assert!(TaggedFilesystem::init().is_err());
-            assert_eq!(
-                list_files(current_dir().unwrap()),
-                [".tag"].map(PathBuf::from)
-            );
+        with_temp_dir(|dir| {
+            File::create(dir.join(METADATA_DIR)).unwrap();
+            assert!(TaggedFilesystem::init(dir).is_err());
+            assert_eq!(list_files(dir), [".tag"].map(PathBuf::from));
         })
     }
 
     #[test]
     fn init_errors_on_sub_directory_of_tagged_filesystem() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with([
-                TaggedPath::new("foo/_bar".to_owned()).unwrap(),
-                TaggedPath::new("foo/_baz".to_owned()).unwrap(),
-            ]);
-            set_current_dir("foo").unwrap();
-            assert!(TaggedFilesystem::init().is_err());
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(
+                dir,
+                [
+                    TaggedPath::new("foo/_bar".to_owned()).unwrap(),
+                    TaggedPath::new("foo/_baz".to_owned()).unwrap(),
+                ],
+            );
+            assert!(TaggedFilesystem::init(filesystem.root.join("foo")).is_err());
             assert_eq!(
                 list_files(filesystem.root),
                 [
@@ -160,13 +161,10 @@ mod tests {
 
     #[test]
     fn init_errors_on_directory_with_files() {
-        with_tempdir(|| {
-            File::create("foo").unwrap();
-            assert!(TaggedFilesystem::init().is_err());
-            assert_eq!(
-                list_files(current_dir().unwrap()),
-                ["foo"].map(PathBuf::from)
-            );
+        with_temp_dir(|dir| {
+            File::create(dir.join("foo")).unwrap();
+            assert!(TaggedFilesystem::init(dir).is_err());
+            assert_eq!(list_files(dir), ["foo"].map(PathBuf::from));
         })
     }
 }

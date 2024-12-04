@@ -9,8 +9,6 @@ mod rename;
 mod rm;
 
 use std::{
-    collections::BTreeSet,
-    env::current_dir,
     fs::{create_dir, create_dir_all, remove_dir, remove_dir_all, remove_file, rename, File},
     path::{Path, PathBuf},
 };
@@ -175,7 +173,7 @@ mod tests {
     use test_strategy::proptest;
 
     use crate::{
-        testing::{tagged_filesystem_with, with_tempdir, TaggedPaths},
+        testing::{tagged_filesystem_with, with_temp_dir, TaggedPaths},
         Tag,
     };
 
@@ -183,8 +181,8 @@ mod tests {
 
     #[proptest]
     fn rm_inverses_touch(paths: TaggedPaths, path: TaggedPath) {
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths);
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths);
 
             let expected = list_files(&filesystem.root);
 
@@ -205,8 +203,8 @@ mod tests {
 
     #[proptest]
     fn rm_inverses_mkdir(paths: TaggedPaths, path: TaggedPath) {
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths);
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths);
 
             let expected = list_files(&filesystem.root);
 
@@ -227,8 +225,8 @@ mod tests {
 
     #[proptest(cases = 20)]
     fn add_inverses_del(paths: TaggedPaths, path: TaggedPath, tag: Tag) {
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths);
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths);
             filesystem
                 .touch(
                     path.tags()
@@ -259,8 +257,8 @@ mod tests {
 
     #[proptest(cases = 20)]
     fn del_inverses_add(paths: TaggedPaths, path: TaggedPath, tag: Tag) {
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths);
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths);
             filesystem
                 .touch(
                     path.tags()

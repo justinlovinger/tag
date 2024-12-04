@@ -52,10 +52,10 @@ impl TaggedFilesystem {
         let tagged_path = TaggedPath::from_tags(&tag_set, name);
 
         create_dir(&file_tags_path)?;
-        let tags_path = file_tags_path.join(PROGRAM_TAGS_DIR);
-        create_dir(&tags_path)?;
+        let program_tags_path = file_tags_path.join(PROGRAM_TAGS_DIR);
+        create_dir(&program_tags_path)?;
         for tag in tag_set.iter() {
-            File::create(tags_path.join(tag.as_path()))?;
+            File::create(program_tags_path.join(tag.as_path()))?;
         }
 
         let mut paths = relevant_paths(tag_set, self.tagged_paths().collect());
@@ -83,7 +83,7 @@ impl TaggedFilesystem {
             None => tagged_path_buf,
         });
         let path_to_print = to_path
-            .strip_prefix(current_dir()?)
+            .strip_prefix(std::env::current_dir().unwrap_or_default())
             .map(|path| path.to_owned())
             .unwrap_or_else(|_| to_path.clone());
         Ok((to_path, file_path, path_to_print))
@@ -93,25 +93,27 @@ impl TaggedFilesystem {
 #[cfg(test)]
 mod tests {
     use std::{
-        env::set_current_dir,
+        env::{current_dir, set_current_dir},
         fs::{read_link, File},
         io::Read,
     };
 
     use crate::{
         tagged_filesystem::tests::list_files,
-        testing::{name, tag, tagged_filesystem, tagged_filesystem_with, with_tempdir},
+        testing::{
+            name, tag, tagged_filesystem, tagged_filesystem_with, with_temp_cwd, with_temp_dir,
+        },
     };
 
     use super::*;
 
     #[test]
     fn touch_creates_an_empty_file_with_metadata_and_a_link_if_name_is_unique() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem();
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem(dir);
             assert_eq!(
                 filesystem.touch([tag("foo")], name("bar")).unwrap(),
-                PathBuf::from("foo-_bar")
+                dir.join("foo-_bar")
             );
             assert_eq!(
                 list_files(&filesystem.root),
@@ -134,8 +136,8 @@ mod tests {
 
     #[test]
     fn touch_works_in_subdir_of_root() {
-        with_tempdir(|| {
-            let _ = tagged_filesystem_with(["foo-_bar", "foo-_baz"]);
+        with_temp_cwd(|| {
+            let _ = tagged_filesystem_with(current_dir().unwrap(), ["foo-_bar", "foo-_baz"]);
 
             set_current_dir("foo").unwrap();
             let filesystem = TaggedFilesystemBuilder::new(current_dir().unwrap())
@@ -179,8 +181,8 @@ mod tests {
 
     #[test]
     fn touch_errors_if_file_with_name_exists() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(["foo-_bar"]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, ["foo-_bar"]);
             assert!(filesystem.touch([tag("baz")], name("bar")).is_err());
             assert_eq!(
                 list_files(&filesystem.root),
@@ -191,8 +193,8 @@ mod tests {
 
     #[test]
     fn touch_errors_if_dir_with_name_exists() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(["foo-_bar"]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, ["foo-_bar"]);
             assert!(filesystem.touch([tag("baz")], name("bar")).is_err());
             assert_eq!(
                 list_files(&filesystem.root),
@@ -203,8 +205,8 @@ mod tests {
 
     #[test]
     fn touch_errors_if_metadata_exists_for_file() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem();
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem(dir);
             create_dir(filesystem.root.file_tags(name("bar"))).unwrap();
             assert!(filesystem.touch([], name("bar")).is_err());
             assert_eq!(
@@ -216,11 +218,11 @@ mod tests {
 
     #[test]
     fn mkdir_creates_an_empty_directory_with_metadata_and_a_link_if_name_is_unique() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem();
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem(dir);
             assert_eq!(
                 filesystem.mkdir([tag("foo")], name("bar")).unwrap(),
-                PathBuf::from("foo-_bar")
+                dir.join("foo-_bar")
             );
             assert_eq!(
                 list_files(&filesystem.root),
@@ -240,8 +242,8 @@ mod tests {
 
     #[test]
     fn mkdir_works_in_subdir_of_root() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem();
+        with_temp_cwd(|| {
+            let filesystem = tagged_filesystem(current_dir().unwrap());
             filesystem.mkdir([tag("foo")], name("bar")).unwrap();
             filesystem.mkdir([tag("foo")], name("baz")).unwrap();
 
@@ -284,8 +286,8 @@ mod tests {
 
     #[test]
     fn mkdir_errors_if_file_with_name_exists() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(["foo-_bar"]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, ["foo-_bar"]);
             assert!(filesystem.mkdir([tag("baz")], name("bar")).is_err());
             assert_eq!(
                 list_files(&filesystem.root),
@@ -296,8 +298,8 @@ mod tests {
 
     #[test]
     fn mkdir_errors_if_dir_with_name_exists() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem();
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem(dir);
             filesystem.mkdir([tag("foo")], name("bar")).unwrap();
             assert!(filesystem.mkdir([tag("baz")], name("bar")).is_err());
             assert_eq!(
@@ -309,9 +311,9 @@ mod tests {
 
     #[test]
     fn mkdir_errors_if_metadata_exists_for_file() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem();
-            create_dir(PathBuf::from(METADATA_DIR).join(TAGS_DIR).join("bar")).unwrap();
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem(dir);
+            create_dir(filesystem.root.file_tags(name("bar"))).unwrap();
             assert!(filesystem.mkdir([], name("bar")).is_err());
             assert_eq!(
                 list_files(&filesystem.root),

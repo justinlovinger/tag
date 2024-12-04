@@ -18,25 +18,34 @@ mod fs {
 
     use once_cell::sync::Lazy;
 
-    pub fn with_tempdir<F, T>(f: F) -> T
+    pub fn with_temp_dir<F, T>(f: F) -> T
+    where
+        F: FnOnce(&Path) -> T,
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let res = (f)(dir.path());
+        dir.close().unwrap();
+        res
+    }
+
+    pub fn with_temp_cwd<F, T>(f: F) -> T
     where
         F: FnOnce() -> T,
     {
-        let cwd = tempfile::tempdir().unwrap();
-
         // Working directory is not per-thread.
         static LOCK: Lazy<Arc<Mutex<()>>> = Lazy::new(|| Arc::new(Mutex::new(())));
-        // Lock may get poisoned from panicking tests, but that is ok.
-        let lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-        std::env::set_current_dir(&cwd).unwrap();
-        let res = (f)();
+        with_temp_dir(|dir| {
+            // Lock may get poisoned from panicking tests, but that is ok.
+            let lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-        drop(lock);
+            std::env::set_current_dir(dir).unwrap();
+            let res = (f)();
 
-        cwd.close().unwrap();
+            drop(lock);
 
-        res
+            res
+        })
     }
 
     pub fn make_file_and_parent<P>(path: P)
@@ -61,15 +70,22 @@ mod tagged_filesystem {
 
     use super::TaggedPathParams;
 
-    pub fn tagged_filesystem() -> TaggedFilesystem {
-        TaggedFilesystem::init().unwrap()
-    }
-
-    pub fn tagged_filesystem_with<P>(paths: impl IntoIterator<Item = P>) -> TaggedFilesystem
+    pub fn tagged_filesystem<P>(dir: P) -> TaggedFilesystem
     where
         P: AsRef<Path>,
     {
-        let filesystem = TaggedFilesystem::init().unwrap();
+        TaggedFilesystem::init(dir).unwrap()
+    }
+
+    pub fn tagged_filesystem_with<P, Q>(
+        dir: P,
+        paths: impl IntoIterator<Item = Q>,
+    ) -> TaggedFilesystem
+    where
+        P: AsRef<Path>,
+        Q: AsRef<Path>,
+    {
+        let filesystem = TaggedFilesystem::init(dir).unwrap();
         for path in paths.into_iter() {
             let tagged_path = TaggedPath::from_path(path.as_ref().to_owned()).unwrap();
             filesystem

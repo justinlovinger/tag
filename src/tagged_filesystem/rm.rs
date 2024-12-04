@@ -27,7 +27,7 @@ impl TaggedFilesystem {
             .next()
             .expect("a tagged path for the file should exist");
         let tags = tagged_path.tags().map(|tag| tag.to_owned()).collect();
-        remove_file(tagged_path)?;
+        remove_file(self.root.join(tagged_path))?;
         self.apply_all(from_move_ops(organize(&relevant_paths(
             tags,
             self.tagged_paths().collect(),
@@ -41,15 +41,15 @@ impl TaggedFilesystem {
 mod tests {
     use crate::{
         tagged_filesystem::tests::list_files,
-        testing::{name, tagged_filesystem, tagged_filesystem_with, with_tempdir},
+        testing::{name, tagged_filesystem, tagged_filesystem_with, with_temp_dir},
     };
 
     use super::*;
 
     #[test]
     fn rm_removes_file_if_it_exists() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(["_foo"]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, ["_foo"]);
             assert!(filesystem.rm(name("foo")).is_ok());
             assert_eq!(
                 list_files(&filesystem.root),
@@ -60,8 +60,8 @@ mod tests {
 
     #[test]
     fn rm_removes_dir_if_it_exists() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem();
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem(dir);
             filesystem.mkdir([], name("foo")).unwrap();
 
             assert!(filesystem.rm(name("foo")).is_ok());
@@ -74,8 +74,8 @@ mod tests {
 
     #[test]
     fn rm_errors_on_missing_file() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem();
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem(dir);
             assert!(filesystem.rm(name("foo")).is_err());
             assert_eq!(
                 list_files(&filesystem.root),

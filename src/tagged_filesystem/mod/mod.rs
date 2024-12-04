@@ -104,7 +104,7 @@ mod tests {
     use crate::{
         tagged_filesystem::tests::list_files,
         testing::{
-            name, tag, tagged_filesystem, tagged_filesystem_with, with_tempdir, TaggedPaths,
+            name, tag, tagged_filesystem, tagged_filesystem_with, with_temp_dir, TaggedPaths,
         },
         Tag,
     };
@@ -113,8 +113,8 @@ mod tests {
 
     #[test]
     fn mod_adds_a_tag() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(["foo-_baz"]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, ["foo-_baz"]);
             filesystem
                 .r#mod(
                     [tag("bar")].into_iter().collect(),
@@ -137,8 +137,8 @@ mod tests {
 
     #[test]
     fn mod_deletes_a_tag() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(["foo-_baz"]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, ["foo-_baz"]);
             filesystem
                 .r#mod(
                     [].into_iter().collect(),
@@ -155,8 +155,8 @@ mod tests {
 
     #[test]
     fn mod_adds_a_tag_and_deletes_a_tag() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(["foo-_baz"]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, ["foo-_baz"]);
             filesystem
                 .r#mod(
                     [tag("bar")].into_iter().collect(),
@@ -173,8 +173,8 @@ mod tests {
 
     #[test]
     fn mod_modifies_all_files() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(["foo/_bar", "foo/_foo"]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, ["foo/_bar", "foo/_foo"]);
             filesystem
                 .r#mod(
                     [tag("bar")].into_iter().collect(),
@@ -199,8 +199,8 @@ mod tests {
 
     #[test]
     fn mod_adds_multiple_tags() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(["foo-_baz"]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, ["foo-_baz"]);
             filesystem
                 .r#mod(
                     [tag("bar"), tag("baz")].into_iter().collect(),
@@ -223,8 +223,8 @@ mod tests {
 
     #[test]
     fn mod_deletes_multiple_tags() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(["foo-baz-_baz"]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, ["foo-baz-_baz"]);
             filesystem
                 .r#mod(
                     [tag("bar")].into_iter().collect(),
@@ -241,8 +241,8 @@ mod tests {
 
     #[proptest(cases = 20)]
     fn mod_changes_nothing_if_no_tags_given(paths: TaggedPaths, path: TaggedPath) {
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths.into_iter().chain([path.clone()]));
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths.into_iter().chain([path.clone()]));
 
             let expected = list_files(&filesystem.root);
 
@@ -268,8 +268,8 @@ mod tests {
         tags_to_add: HashSet<Tag>,
         tags_to_del: HashSet<Tag>,
     ) {
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths.iter().chain(&paths_to_mod));
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths.iter().chain(&paths_to_mod));
 
             filesystem
                 .r#mod(
@@ -306,8 +306,8 @@ mod tests {
             .map(|path| path.name().to_owned())
             .collect::<FxHashSet<_>>();
 
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths.iter().chain(&paths_to_mod));
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths.iter().chain(&paths_to_mod));
 
             filesystem
                 .r#mod(
@@ -331,8 +331,8 @@ mod tests {
 
     #[test]
     fn mod_returns_error_if_file_does_not_exist() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem();
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem(dir);
             assert!(filesystem
                 .r#mod(
                     [tag("bar")].into_iter().collect(),

@@ -284,7 +284,7 @@ fn build_ops<'a>(
 
 #[cfg(test)]
 mod tests {
-    use std::{env::set_current_dir, fs::File};
+    use std::fs::File;
 
     use proptest::prelude::{prop::collection::vec, *};
     use test_strategy::proptest;
@@ -292,7 +292,7 @@ mod tests {
     use crate::{
         tagged_filesystem::tests::{list_files, list_tagged_paths},
         testing::{
-            make_file_and_parent, tagged_filesystem, tagged_filesystem_with, with_tempdir,
+            make_file_and_parent, tagged_filesystem, tagged_filesystem_with, with_temp_dir,
             TaggedPaths,
         },
         Tag,
@@ -302,8 +302,8 @@ mod tests {
 
     #[proptest(cases = 20)]
     fn build_removes_tags_for_missing_files(paths: TaggedPaths, path: TaggedPath) {
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths);
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths);
             let expected = list_files(&filesystem.root);
 
             for tag in path.tags() {
@@ -320,8 +320,8 @@ mod tests {
 
     #[proptest(cases = 20)]
     fn build_adds_a_tags_directory_for_files_without(paths: TaggedPaths, name: Name) {
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths);
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths);
             filesystem.touch([], name.clone()).unwrap();
             let expected = list_files(&filesystem.root);
 
@@ -337,8 +337,8 @@ mod tests {
 
     #[proptest(cases = 20)]
     fn build_adds_a_program_tags_directory_for_files_without(paths: TaggedPaths, name: Name) {
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths);
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths);
             filesystem.touch([], name.clone()).unwrap();
             let expected = list_files(&filesystem.root);
 
@@ -354,8 +354,8 @@ mod tests {
 
     #[proptest(cases = 20)]
     fn build_removes_tagged_paths_for_missing_files(paths: TaggedPaths, path: TaggedPath) {
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths);
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths);
 
             let expected = list_files(&filesystem.root);
 
@@ -378,8 +378,8 @@ mod tests {
 
     #[proptest(cases = 20)]
     fn build_adds_tagged_paths_for_files_without(paths: TaggedPaths, path: TaggedPath) {
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths.iter().chain([&path]));
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths.iter().chain([&path]));
 
             let expected = list_files(&filesystem.root);
 
@@ -411,8 +411,8 @@ mod tests {
             path.name(),
         );
 
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths.iter().chain([&path]));
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths.iter().chain([&path]));
 
             let expected = list_files(&filesystem.root);
 
@@ -443,8 +443,8 @@ mod tests {
             path.name(),
         );
 
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths);
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths);
             filesystem
                 .touch(
                     path.tags().map(|tag| tag.to_owned()).chain([tag.clone()]),
@@ -473,16 +473,13 @@ mod tests {
 
     #[proptest(cases = 20)]
     fn build_deletes_duplicate_tagged_paths(paths: TaggedPaths, path: TaggedPath) {
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths.iter().chain([&path]));
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths.iter().chain([&path]));
             let expected = list_files(&filesystem.root);
 
             symlink_file(
                 filesystem.root.file(path.name()),
-                filesystem
-                    .root
-                    .as_path()
-                    .join(format!("foobar-_{}", path.name())),
+                filesystem.root.join(format!("foobar-_{}", path.name())),
             )
             .unwrap();
             filesystem.build().unwrap();
@@ -496,14 +493,11 @@ mod tests {
 
     #[test]
     fn build_organizes_paths_into_optimal_tag_directories() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with([
-                "a/b/c/_foo",
-                "a-b-_bar",
-                "d/e-_baz",
-                "🙂/🙁/_fez",
-                "_fiz",
-            ]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(
+                dir,
+                ["a/b/c/_foo", "a-b-_bar", "d/e-_baz", "🙂/🙁/_fez", "_fiz"],
+            );
             filesystem.build().unwrap();
             assert_eq!(
                 list_tagged_paths(filesystem.root),
@@ -514,8 +508,8 @@ mod tests {
 
     #[test]
     fn build_organizes_paths_into_optimal_tag_directories_when_all_have_same_tags() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(["a-b-c-_bar", "a/b/c/_foo"]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, ["a-b-c-_bar", "a/b/c/_foo"]);
             filesystem.build().unwrap();
             assert_eq!(
                 list_tagged_paths(filesystem.root),
@@ -526,8 +520,8 @@ mod tests {
 
     #[test]
     fn build_breaks_ties_in_favor_of_increasing_length() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(["a/bb/_1", "bb/_2", "a/_3", "dd-ccc-_4"]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, ["a/bb/_1", "bb/_2", "a/_3", "dd-ccc-_4"]);
             filesystem.build().unwrap();
             assert_eq!(
                 list_tagged_paths(filesystem.root),
@@ -538,8 +532,8 @@ mod tests {
 
     #[test]
     fn build_ignores_untagged_paths() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(["a-_foo"]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, ["a-_foo"]);
             create_dir(filesystem.root.join("a")).unwrap();
             rename(
                 filesystem.root.join("a-_foo"),
@@ -575,20 +569,15 @@ mod tests {
     ) {
         let (dirs, dirs_paths) = args;
 
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem();
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem(dir);
             for dir in dirs.0.iter() {
                 filesystem
                     .mkdir(dir.tags().map(|tag| tag.to_owned()), dir.name().to_owned())
                     .unwrap();
             }
-            for (dir, paths) in filesystem
-                .find(Vec::new(), Vec::new())
-                .unwrap()
-                .zip(dirs_paths)
-            {
-                set_current_dir(filesystem.root.file(dir.name())).unwrap();
-                let filesystem = TaggedFilesystem::init().unwrap();
+            for (dir, paths) in read_paths(filesystem.root.files()).unwrap().zip(dirs_paths) {
+                let filesystem = TaggedFilesystem::init(dir).unwrap();
                 for path in paths {
                     filesystem
                         .touch(
@@ -611,8 +600,8 @@ mod tests {
 
     #[proptest(cases = 20)]
     fn build_is_idempotent(paths: TaggedPaths) {
-        let (first_pass, second_pass) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths);
+        let (first_pass, second_pass) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths);
 
             filesystem.build().unwrap();
             let first_pass = list_files(&filesystem.root);
@@ -626,12 +615,12 @@ mod tests {
 
     #[proptest(cases = 20)]
     fn build_ignores_hidden_paths(paths: TaggedPaths, hidden_paths: TaggedPaths) {
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths);
-
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths);
             for path in hidden_paths {
-                make_file_and_parent(format!(".{path}"));
+                make_file_and_parent(filesystem.root.join(format!(".{path}")));
             }
+
             let expected = list_files(&filesystem.root);
 
             filesystem.build().unwrap();
@@ -646,11 +635,11 @@ mod tests {
     #[test]
     #[ignore] // This test is slow.
     fn build_does_not_panic_on_many_non_unique_tags() {
-        with_tempdir(|| {
+        with_temp_dir(|dir| {
             // `organize` is prone to stack-overflow
             // if recursion is not handled carefully.
             // This tests we support at least `BREADTH * DEPTH` non-unique tags.
-            let filesystem = tagged_filesystem();
+            let filesystem = tagged_filesystem(dir);
             const BREADTH: usize = 200;
             const DEPTH: usize = 50;
             let names = (0..(BREADTH * 2))
@@ -696,8 +685,8 @@ mod tests {
 
         // We want to test both unique and non-unique tags.
         // They may be handled differently.
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with([format!("{a}/{b}/{c}/_foo")]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, [format!("{a}/{b}/{c}/_foo")]);
             filesystem.build().unwrap();
             assert_eq!(
                 list_tagged_paths(filesystem.root),
@@ -705,9 +694,11 @@ mod tests {
             );
         });
 
-        with_tempdir(|| {
-            let filesystem =
-                tagged_filesystem_with([format!("{a}/{b}/{c}-_bar"), format!("{a}/{b}-{c}-_foo")]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(
+                dir,
+                [format!("{a}/{b}/{c}-_bar"), format!("{a}/{b}-{c}-_foo")],
+            );
             filesystem.build().unwrap();
             assert_eq!(
                 list_tagged_paths(filesystem.root),
@@ -716,8 +707,8 @@ mod tests {
         });
 
         // The name could make the last inline tag too long.
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with([format!("{a}/{b}/_{c}")]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, [format!("{a}/{b}/_{c}")]);
             filesystem.build().unwrap();
             assert_eq!(
                 list_tagged_paths(filesystem.root),

@@ -27,21 +27,29 @@ impl Root {
         }
     }
 
-    pub fn from_child<P>(path: P) -> std::io::Result<Option<Self>>
+    pub fn from_child<P>(start: P) -> std::io::Result<Option<Self>>
     where
         P: AsRef<Path>,
     {
-        for path in path.as_ref().ancestors() {
+        for path in start.as_ref().ancestors() {
             if let Some(root) = Self::new(path.to_owned())? {
+                for path in start
+                    .as_ref()
+                    .ancestors()
+                    .map_while(|path| path.strip_prefix(root.as_path()).ok())
+                    .take_while(|path| path != &PathBuf::new().as_path())
+                {
+                    if path.parent().map_or(false, |parent| {
+                        parent.ends_with(PathBuf::from(METADATA_DIR).join(FILES_DIR))
+                    }) {
+                        return Ok(None);
+                    }
+                    if TaggedPath::from_path(path.to_owned()).is_ok() {
+                        return Ok(None);
+                    }
+                }
+
                 return Ok(Some(root));
-            }
-            if path.parent().map_or(false, |parent| {
-                parent.ends_with(PathBuf::from(METADATA_DIR).join(FILES_DIR))
-            }) {
-                return Ok(None);
-            }
-            if TaggedPath::from_path(path.to_owned()).is_ok() {
-                return Ok(None);
             }
         }
         Ok(None)

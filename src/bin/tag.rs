@@ -182,7 +182,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     if let Some(Commands::Init) = args.command {
-        TaggedFilesystem::init()?;
+        TaggedFilesystem::init(current_dir()?)?;
     } else {
         let filesystem = TaggedFilesystemBuilder::new(current_dir()?)
             .build()?

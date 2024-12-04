@@ -1,3 +1,5 @@
+use crate::TAG_END;
+
 use super::*;
 
 #[derive(Debug, thiserror::Error)]
@@ -47,17 +49,20 @@ impl TaggedFilesystem {
             .filtered_tagged_paths(move |path| path.name() == old_name.as_ref())
             .next()
         {
-            let new_tagged_path = TaggedPath::from_tags(
-                &old_tagged_path.tags().map(|tag| tag.to_owned()).collect(),
-                new_name,
+            let absolute_new_tagged_path = self.root.join(
+                TaggedPath::new(format!("{}{TAG_END}{new_name}", old_tagged_path.tags_str()))
+                    .unwrap(),
             );
-            remove_file(old_tagged_path.as_path())?;
+            remove_file(self.root.join(old_tagged_path))?;
             if new_file_path.is_dir() {
-                symlink_dir(new_file_path, &new_tagged_path)?;
+                symlink_dir(new_file_path, &absolute_new_tagged_path)?;
             } else {
-                symlink_file(new_file_path, &new_tagged_path)?;
+                symlink_file(new_file_path, &absolute_new_tagged_path)?;
             }
-            Ok(new_tagged_path.into_path())
+            Ok(absolute_new_tagged_path
+                .strip_prefix(std::env::current_dir().unwrap_or_default())
+                .map(|path| path.to_owned())
+                .unwrap_or_else(|_| absolute_new_tagged_path.clone()))
         } else {
             Ok(PathBuf::new())
         }
@@ -73,18 +78,18 @@ mod tests {
 
     use crate::{
         tagged_filesystem::tests::list_files,
-        testing::{name, tagged_filesystem, tagged_filesystem_with, with_tempdir, TaggedPaths},
+        testing::{name, tagged_filesystem, tagged_filesystem_with, with_temp_dir, TaggedPaths},
     };
 
     use super::*;
 
     #[test]
     fn rename_renames_file_and_tagged_path_if_file_exists_and_no_file_with_new_name() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(["foo-_bar"]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, ["foo-_bar"]);
             assert_eq!(
                 filesystem.rename(name("bar"), name("baz")).unwrap(),
-                PathBuf::from("foo-_baz")
+                filesystem.root.join("foo-_baz")
             );
             assert_eq!(
                 list_files(&filesystem.root),
@@ -99,8 +104,8 @@ mod tests {
 
     #[proptest]
     fn rename_errors_if_names_are_same(paths: TaggedPaths, path: TaggedPath) {
-        let (actual, expected) = with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(paths.iter().chain([&path]));
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths.iter().chain([&path]));
 
             let expected = list_files(&filesystem.root);
 
@@ -117,8 +122,8 @@ mod tests {
 
     #[test]
     fn rename_errors_if_file_does_not_exist() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem();
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem(dir);
             assert!(filesystem.rename(name("bar"), name("baz")).is_err());
             assert_eq!(
                 list_files(&filesystem.root),
@@ -129,8 +134,8 @@ mod tests {
 
     #[test]
     fn rename_errors_if_file_exists_with_new_name() {
-        with_tempdir(|| {
-            let filesystem = tagged_filesystem_with(["fiz-_bar", "foo-_baz"]);
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, ["fiz-_bar", "foo-_baz"]);
             assert!(filesystem.rename(name("bar"), name("baz")).is_err());
             assert_eq!(
                 list_files(&filesystem.root),
