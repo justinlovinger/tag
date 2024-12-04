@@ -5,8 +5,6 @@ use super::*;
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub enum RenameError {
-    #[error("New and old name must be different.")]
-    SameName,
     NoFile(#[from] NoFileError),
     FileExists(#[from] FileExistsError),
     NoMetadataExists(#[from] NoMetadataExistsError),
@@ -17,7 +15,7 @@ pub enum RenameError {
 impl TaggedFilesystem {
     pub fn rename(&self, old_name: Name, new_name: Name) -> Result<PathBuf, RenameError> {
         if old_name == new_name {
-            return Err(RenameError::SameName);
+            return Ok(PathBuf::new());
         }
 
         let old_file_path = self.root.file(&old_name);
@@ -103,15 +101,18 @@ mod tests {
     }
 
     #[proptest]
-    fn rename_errors_if_names_are_same(paths: TaggedPaths, path: TaggedPath) {
+    fn rename_does_nothing_if_names_are_same(paths: TaggedPaths, path: TaggedPath) {
         let (actual, expected) = with_temp_dir(|dir| {
             let filesystem = tagged_filesystem_with(dir, paths.iter().chain([&path]));
 
             let expected = list_files(&filesystem.root);
 
-            assert!(filesystem
-                .rename(path.name().to_owned(), path.name().to_owned())
-                .is_err());
+            assert_eq!(
+                filesystem
+                    .rename(path.name().to_owned(), path.name().to_owned())
+                    .unwrap(),
+                PathBuf::new()
+            );
             let actual = list_files(&filesystem.root);
 
             (actual, expected)
