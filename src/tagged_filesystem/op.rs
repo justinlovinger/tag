@@ -24,11 +24,11 @@ impl From<MoveOp> for Op {
 pub(crate) fn from_move_ops(ops: Vec<MoveOp>) -> impl Iterator<Item = Op> {
     // We know a directory exists
     // if a file is moving from it.
-    let from_ancestors = BTreeSet::from_iter(
+    let from_ancestors = FxHashSet::from_iter(
         ops.iter()
             .flat_map(|MoveOp { from, to: _ }| from.ancestors().skip(1)),
     );
-    let ensure_dirs = BTreeSet::from_iter(
+    let ensure_dirs = FxHashSet::from_iter(
         ops.iter()
             .filter_map(|MoveOp { from: _, to }| to.parent())
             .filter(|to| !from_ancestors.contains(to)),
@@ -36,7 +36,8 @@ pub(crate) fn from_move_ops(ops: Vec<MoveOp>) -> impl Iterator<Item = Op> {
     // We do not need to ensure a parent exists
     // if its child is already being ensured.
     let ensure_dir_ancestors =
-        BTreeSet::from_iter(ensure_dirs.iter().flat_map(|path| path.ancestors().skip(1)));
+        FxHashSet::from_iter(ensure_dirs.iter().flat_map(|path| path.ancestors().skip(1)));
+    // Order matters.
     let ensure_dirs = BTreeSet::from_iter(
         ensure_dirs
             .into_iter()
@@ -46,10 +47,11 @@ pub(crate) fn from_move_ops(ops: Vec<MoveOp>) -> impl Iterator<Item = Op> {
 
     // We know a directory will not be empty
     // if a file is moving to it.
-    let to_ancestors = BTreeSet::from_iter(
+    let to_ancestors = FxHashSet::from_iter(
         ops.iter()
             .flat_map(|MoveOp { from: _, to }| to.ancestors().skip(1)),
     );
+    // Order matters.
     let del_dirs = BTreeSet::from_iter(
         ops.iter()
             .flat_map(|MoveOp { from, to: _ }| {
