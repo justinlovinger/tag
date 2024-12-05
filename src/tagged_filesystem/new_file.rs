@@ -98,10 +98,14 @@ mod tests {
         io::Read,
     };
 
+    use proptest::prelude::*;
+    use test_strategy::proptest;
+
     use crate::{
         tagged_filesystem::tests::list_files,
         testing::{
             name, tag, tagged_filesystem, tagged_filesystem_with, with_temp_cwd, with_temp_dir,
+            TaggedPaths,
         },
     };
 
@@ -177,6 +181,28 @@ mod tests {
                 filesystem.root.file(name("biz"))
             );
         })
+    }
+
+    #[proptest(cases = 20)]
+    fn touch_builds(paths: TaggedPaths, path: TaggedPath) {
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths);
+
+            filesystem
+                .touch(
+                    path.tags().map(|tag| tag.to_owned()),
+                    path.name().to_owned(),
+                )
+                .unwrap();
+            let actual = list_files(&filesystem.root);
+
+            filesystem.build().unwrap();
+            let expected = list_files(filesystem.root);
+
+            (actual, expected)
+        });
+
+        prop_assert_eq!(actual, expected)
     }
 
     #[test]
@@ -282,6 +308,28 @@ mod tests {
                 filesystem.root.file(name("biz"))
             );
         })
+    }
+
+    #[proptest(cases = 20)]
+    fn mkdir_builds(paths: TaggedPaths, path: TaggedPath) {
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths);
+
+            filesystem
+                .mkdir(
+                    path.tags().map(|tag| tag.to_owned()),
+                    path.name().to_owned(),
+                )
+                .unwrap();
+            let actual = list_files(&filesystem.root);
+
+            filesystem.build().unwrap();
+            let expected = list_files(filesystem.root);
+
+            (actual, expected)
+        });
+
+        prop_assert_eq!(actual, expected)
     }
 
     #[test]

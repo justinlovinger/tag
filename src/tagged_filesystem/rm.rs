@@ -39,9 +39,12 @@ impl TaggedFilesystem {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+    use test_strategy::proptest;
+
     use crate::{
         tagged_filesystem::tests::list_files,
-        testing::{name, tagged_filesystem, tagged_filesystem_with, with_temp_dir},
+        testing::{name, tagged_filesystem, tagged_filesystem_with, with_temp_dir, TaggedPaths},
     };
 
     use super::*;
@@ -70,6 +73,23 @@ mod tests {
                 [".tag/files", ".tag/tags"].map(PathBuf::from)
             );
         });
+    }
+
+    #[proptest(cases = 20)]
+    fn rm_builds(paths: TaggedPaths, path: TaggedPath) {
+        let (actual, expected) = with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, paths.iter().chain([&path]));
+
+            filesystem.rm(path.name().to_owned()).unwrap();
+            let actual = list_files(&filesystem.root);
+
+            filesystem.build().unwrap();
+            let expected = list_files(filesystem.root);
+
+            (actual, expected)
+        });
+
+        prop_assert_eq!(actual, expected)
     }
 
     #[test]
