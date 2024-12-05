@@ -301,13 +301,16 @@ mod tests {
     use super::*;
 
     #[proptest(cases = 20)]
-    fn build_removes_tags_for_missing_files(paths: TaggedPaths, path: TaggedPath) {
+    fn build_removes_tags_for_missing_files(paths: TaggedPaths, other_paths: TaggedPaths) {
         let (actual, expected) = with_temp_dir(|dir| {
             let filesystem = tagged_filesystem_with(dir, paths);
+
             let expected = list_files(&filesystem.root);
 
-            for tag in path.tags() {
-                make_file_and_parent(filesystem.root.tag(path.name(), tag));
+            for path in other_paths {
+                for tag in path.tags() {
+                    make_file_and_parent(filesystem.root.tag(path.name(), tag));
+                }
             }
             filesystem.build().unwrap();
             let actual = list_files(&filesystem.root);
@@ -319,13 +322,18 @@ mod tests {
     }
 
     #[proptest(cases = 20)]
-    fn build_adds_a_tags_directory_for_files_without(paths: TaggedPaths, name: Name) {
+    fn build_adds_a_tags_directory_for_files_without(paths: TaggedPaths, names: Vec<Name>) {
         let (actual, expected) = with_temp_dir(|dir| {
             let filesystem = tagged_filesystem_with(dir, paths);
-            filesystem.touch([], name.clone()).unwrap();
+            for name in &names {
+                filesystem.touch([], name.clone()).unwrap();
+            }
+
             let expected = list_files(&filesystem.root);
 
-            remove_dir_all(filesystem.root.file_tags(name)).unwrap();
+            for name in &names {
+                remove_dir_all(filesystem.root.file_tags(name)).unwrap();
+            }
             filesystem.build().unwrap();
             let actual = list_files(&filesystem.root);
 
@@ -336,13 +344,18 @@ mod tests {
     }
 
     #[proptest(cases = 20)]
-    fn build_adds_a_program_tags_directory_for_files_without(paths: TaggedPaths, name: Name) {
+    fn build_adds_a_program_tags_directory_for_files_without(paths: TaggedPaths, names: Vec<Name>) {
         let (actual, expected) = with_temp_dir(|dir| {
             let filesystem = tagged_filesystem_with(dir, paths);
-            filesystem.touch([], name.clone()).unwrap();
+            for name in &names {
+                filesystem.touch([], name.clone()).unwrap();
+            }
+
             let expected = list_files(&filesystem.root);
 
-            remove_dir(filesystem.root.program_tags(name)).unwrap();
+            for name in &names {
+                remove_dir(filesystem.root.program_tags(name)).unwrap();
+            }
             filesystem.build().unwrap();
             let actual = list_files(&filesystem.root);
 
@@ -353,20 +366,22 @@ mod tests {
     }
 
     #[proptest(cases = 20)]
-    fn build_removes_tagged_paths_for_missing_files(paths: TaggedPaths, path: TaggedPath) {
+    fn build_removes_tagged_paths_for_missing_files(paths: TaggedPaths, other_paths: TaggedPaths) {
         let (actual, expected) = with_temp_dir(|dir| {
             let filesystem = tagged_filesystem_with(dir, paths);
 
             let expected = list_files(&filesystem.root);
 
-            filesystem
-                .touch(
-                    path.tags().map(|tag| tag.to_owned()),
-                    path.name().to_owned(),
-                )
-                .unwrap();
-            remove_file(filesystem.root.file(path.name())).unwrap();
-            remove_dir_all(filesystem.root.file_tags(path.name())).unwrap();
+            for path in other_paths {
+                filesystem
+                    .touch(
+                        path.tags().map(|tag| tag.to_owned()),
+                        path.name().to_owned(),
+                    )
+                    .unwrap();
+                remove_file(filesystem.root.file(path.name())).unwrap();
+                remove_dir_all(filesystem.root.file_tags(path.name())).unwrap();
+            }
             filesystem.build().unwrap();
             let actual = list_files(&filesystem.root);
 
@@ -377,21 +392,23 @@ mod tests {
     }
 
     #[proptest(cases = 20)]
-    fn build_adds_tagged_paths_for_files_without(paths: TaggedPaths, path: TaggedPath) {
+    fn build_adds_tagged_paths_for_files_without(paths: TaggedPaths, other_paths: TaggedPaths) {
         let (actual, expected) = with_temp_dir(|dir| {
-            let filesystem = tagged_filesystem_with(dir, paths.iter().chain([&path]));
+            let filesystem = tagged_filesystem_with(dir, paths.iter().chain(&other_paths));
 
             let expected = list_files(&filesystem.root);
 
-            remove_file(
-                filesystem.root.join(
-                    filesystem
-                        .filtered_tagged_paths(move |x| x.name() == path.name())
-                        .next()
-                        .unwrap(),
-                ),
-            )
-            .unwrap();
+            for path in other_paths {
+                remove_file(
+                    filesystem.root.join(
+                        filesystem
+                            .filtered_tagged_paths(move |x| x.name() == path.name())
+                            .next()
+                            .unwrap(),
+                    ),
+                )
+                .unwrap();
+            }
             filesystem.build().unwrap();
             let actual = list_files(&filesystem.root);
 
@@ -402,28 +419,46 @@ mod tests {
     }
 
     #[proptest(cases = 20)]
-    fn build_deletes_extra_tags_from_tagged_paths(paths: TaggedPaths, path: TaggedPath, tag: Tag) {
-        let path = TaggedPath::from_tags(
-            &path
-                .tags()
-                .filter(|path_tag| path_tag != &tag.as_ref())
-                .collect(),
-            path.name(),
-        );
+    fn build_deletes_extra_tags_from_tagged_paths(
+        paths: TaggedPaths,
+        #[strategy(
+            TaggedPaths::arbitrary().prop_flat_map(|paths| {
+                let len = paths.len();
+                (Just(paths), vec(Tag::arbitrary(), len))
+            })
+        )]
+        other_paths_extra_tags: (TaggedPaths, Vec<Tag>),
+    ) {
+        let (other_paths, extra_tags) = other_paths_extra_tags;
+        let other_paths = other_paths
+            .into_iter()
+            .zip(&extra_tags)
+            .map(|(path, tag)| {
+                TaggedPath::from_tags(
+                    &path
+                        .tags()
+                        .filter(|path_tag| path_tag != &tag.as_ref())
+                        .collect(),
+                    path.name(),
+                )
+            })
+            .collect_vec();
 
         let (actual, expected) = with_temp_dir(|dir| {
-            let filesystem = tagged_filesystem_with(dir, paths.iter().chain([&path]));
+            let filesystem = tagged_filesystem_with(dir, paths.iter().chain(&other_paths));
 
             let expected = list_files(&filesystem.root);
 
-            filesystem.rm(path.name().to_owned()).unwrap();
-            filesystem
-                .touch(
-                    path.tags().map(|tag| tag.to_owned()).chain([tag.clone()]),
-                    path.name().to_owned(),
-                )
-                .unwrap();
-            remove_file(filesystem.root.tag(path.name(), tag)).unwrap();
+            for (path, tag) in other_paths.into_iter().zip(extra_tags) {
+                filesystem.rm(path.name().to_owned()).unwrap();
+                filesystem
+                    .touch(
+                        path.tags().map(|tag| tag.to_owned()).chain([tag.clone()]),
+                        path.name().to_owned(),
+                    )
+                    .unwrap();
+                remove_file(filesystem.root.tag(path.name(), tag)).unwrap();
+            }
             filesystem.build().unwrap();
             let actual = list_files(&filesystem.root);
 
@@ -434,34 +469,54 @@ mod tests {
     }
 
     #[proptest(cases = 20)]
-    fn build_adds_missing_tags_to_tagged_paths(paths: TaggedPaths, path: TaggedPath, tag: Tag) {
-        let path = TaggedPath::from_tags(
-            &path
-                .tags()
-                .filter(|path_tag| path_tag != &tag.as_ref())
-                .collect(),
-            path.name(),
-        );
+    fn build_adds_missing_tags_to_tagged_paths(
+        paths: TaggedPaths,
+        #[strategy(
+            TaggedPaths::arbitrary().prop_flat_map(|paths| {
+                let len = paths.len();
+                (Just(paths), vec(Tag::arbitrary(), len))
+            })
+        )]
+        other_paths_missing_tags: (TaggedPaths, Vec<Tag>),
+    ) {
+        let (other_paths, missing_tags) = other_paths_missing_tags;
+        let other_paths = other_paths
+            .into_iter()
+            .zip(&missing_tags)
+            .map(|(path, tag)| {
+                TaggedPath::from_tags(
+                    &path
+                        .tags()
+                        .filter(|path_tag| path_tag != &tag.as_ref())
+                        .collect(),
+                    path.name(),
+                )
+            })
+            .collect_vec();
 
         let (actual, expected) = with_temp_dir(|dir| {
             let filesystem = tagged_filesystem_with(dir, paths);
-            filesystem
-                .touch(
-                    path.tags().map(|tag| tag.to_owned()).chain([tag.clone()]),
-                    path.name().to_owned(),
-                )
-                .unwrap();
+            for (path, tag) in other_paths.iter().zip(&missing_tags) {
+                filesystem
+                    .touch(
+                        path.tags().map(|tag| tag.to_owned()).chain([tag.clone()]),
+                        path.name().to_owned(),
+                    )
+                    .unwrap();
+            }
 
             let expected = list_files(&filesystem.root);
 
-            filesystem.rm(path.name().to_owned()).unwrap();
-            filesystem
-                .touch(
-                    path.tags().map(|tag| tag.to_owned()),
-                    path.name().to_owned(),
-                )
-                .unwrap();
-            File::create(filesystem.root.tag(path.name(), tag)).unwrap();
+            for (path, tag) in other_paths.iter().zip(&missing_tags) {
+                filesystem.rm(path.name().to_owned()).unwrap();
+                filesystem
+                    .touch(
+                        path.tags().map(|tag| tag.to_owned()),
+                        path.name().to_owned(),
+                    )
+                    .unwrap();
+                File::create(filesystem.root.tag(path.name(), tag)).unwrap();
+            }
             filesystem.build().unwrap();
             let actual = list_files(&filesystem.root);
 
@@ -472,16 +527,18 @@ mod tests {
     }
 
     #[proptest(cases = 20)]
-    fn build_deletes_duplicate_tagged_paths(paths: TaggedPaths, path: TaggedPath) {
+    fn build_deletes_duplicate_tagged_paths(paths: TaggedPaths, other_paths: TaggedPaths) {
         let (actual, expected) = with_temp_dir(|dir| {
-            let filesystem = tagged_filesystem_with(dir, paths.iter().chain([&path]));
+            let filesystem = tagged_filesystem_with(dir, paths.iter().chain(&other_paths));
             let expected = list_files(&filesystem.root);
 
-            symlink_file(
-                filesystem.root.file(path.name()),
-                filesystem.root.join(format!("foobar-_{}", path.name())),
-            )
-            .unwrap();
+            for path in other_paths {
+                symlink_file(
+                    filesystem.root.file(path.name()),
+                    filesystem.root.join(format!("foobar-_{}", path.name())),
+                )
+                .unwrap();
+            }
             filesystem.build().unwrap();
             let actual = list_files(&filesystem.root);
 
@@ -558,13 +615,13 @@ mod tests {
     #[proptest(cases = 20)]
     fn build_ignores_nested_tagged_paths(
         #[strategy(
-        TaggedPaths::arbitrary()
-            .prop_flat_map(|paths| (
-                vec(TaggedPaths::arbitrary(), paths.len()),
-                Just(paths)
-            ))
-            .prop_map(|(x, y)| (y, x))
-    )]
+            TaggedPaths::arbitrary()
+                .prop_flat_map(|paths| (
+                    vec(TaggedPaths::arbitrary(), paths.len()),
+                    Just(paths)
+                ))
+                .prop_map(|(x, y)| (y, x))
+        )]
         args: (TaggedPaths, Vec<TaggedPaths>),
     ) {
         let (dirs, dirs_paths) = args;
