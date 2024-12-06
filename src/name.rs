@@ -83,6 +83,12 @@ impl Borrow<NameRef> for Name {
     }
 }
 
+impl<'a> Borrow<NameRef> for &'a Name {
+    fn borrow(&self) -> &NameRef {
+        (*self).borrow()
+    }
+}
+
 impl<'a> From<&'a NameRef> for Name {
     fn from(value: &'a NameRef) -> Self {
         value.to_owned()

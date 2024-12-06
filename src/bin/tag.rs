@@ -49,7 +49,14 @@ enum Commands {
     /// Unique tags are inlined.
     ///
     /// Untagged files are not changed.
-    Build,
+    Build {
+        /// Names of files to clean up and build
+        ///
+        /// If empty,
+        /// build all files.
+        #[clap(required = false, value_name = "NAME")]
+        names: Option<Vec<Name>>,
+    },
     /// Create an empty file with the given tags and name
     Touch {
         /// Tags to add to the file
@@ -189,7 +196,10 @@ fn main() -> anyhow::Result<()> {
             .expect("The working directory is not tagged. Please run `tag init` to initialize.");
         match args.command {
             Some(Commands::Init) => unreachable!(),
-            Some(Commands::Build) => filesystem.build()?,
+            Some(Commands::Build { names }) => match names {
+                Some(names) => filesystem.build_some(names)?,
+                None => filesystem.build()?,
+            },
             Some(Commands::Touch { tags, name }) => print_paths([filesystem.touch(tags, name)?])?,
             Some(Commands::Mkdir { tags, name }) => print_paths([filesystem.mkdir(tags, name)?])?,
             Some(Commands::Rm { file }) => filesystem.rm(file.into())?,
