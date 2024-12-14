@@ -1,6 +1,4 @@
-use crate::TAG_END;
-
-use super::*;
+use super::{build::BuildError, *};
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -9,13 +7,14 @@ pub enum RenameError {
     FileExists(#[from] FileExistsError),
     NoMetadataExists(#[from] NoMetadataExistsError),
     MetadataExists(#[from] MetadataExistsError),
+    Build(#[from] BuildError),
     Filesystem(#[from] std::io::Error),
 }
 
 impl TaggedFilesystem {
-    pub fn rename(&self, old_name: Name, new_name: Name) -> Result<PathBuf, RenameError> {
+    pub fn rename(&self, old_name: Name, new_name: Name) -> Result<(), RenameError> {
         if old_name == new_name {
-            return Ok(PathBuf::new());
+            return Ok(());
         }
 
         let old_file_path = self.root.file(&old_name);
@@ -43,27 +42,9 @@ impl TaggedFilesystem {
         rename(old_file_path, &new_file_path)?;
         std::fs::remove_dir_all(old_file_tags_path)?;
 
-        if let Some(old_tagged_path) = self
-            .filtered_tagged_paths(move |path| path.name() == old_name.as_ref())
-            .next()
-        {
-            let absolute_new_tagged_path = self.root.join(
-                TaggedPath::new(format!("{}{TAG_END}{new_name}", old_tagged_path.tags_str()))
-                    .unwrap(),
-            );
-            remove_file(self.root.join(old_tagged_path))?;
-            if new_file_path.is_dir() {
-                symlink_dir(new_file_path, &absolute_new_tagged_path)?;
-            } else {
-                symlink_file(new_file_path, &absolute_new_tagged_path)?;
-            }
-            Ok(absolute_new_tagged_path
-                .strip_prefix(std::env::current_dir().unwrap_or_default())
-                .map(|path| path.to_owned())
-                .unwrap_or_else(|_| absolute_new_tagged_path.clone()))
-        } else {
-            Ok(PathBuf::new())
-        }
+        self.build_some(vec![old_name, new_name])?;
+
+        Ok(())
     }
 }
 
@@ -85,10 +66,8 @@ mod tests {
     fn rename_renames_file_and_tagged_path_if_file_exists_and_no_file_with_new_name() {
         with_temp_dir(|dir| {
             let filesystem = tagged_filesystem_with(dir, ["foo-_bar"]);
-            assert_eq!(
-                filesystem.rename(name("bar"), name("baz")).unwrap(),
-                filesystem.root.join("foo-_baz")
-            );
+
+            filesystem.rename(name("bar"), name("baz")).unwrap();
             assert_eq!(
                 list_files(&filesystem.root),
                 [".tag/files/baz", ".tag/tags/baz/tag/foo", "foo-_baz"].map(PathBuf::from)
@@ -107,12 +86,9 @@ mod tests {
 
             let expected = list_files(&filesystem.root);
 
-            assert_eq!(
-                filesystem
-                    .rename(path.name().to_owned(), path.name().to_owned())
-                    .unwrap(),
-                PathBuf::new()
-            );
+            filesystem
+                .rename(path.name().to_owned(), path.name().to_owned())
+                .unwrap();
             let actual = list_files(&filesystem.root);
 
             (actual, expected)

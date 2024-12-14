@@ -1,17 +1,18 @@
-use super::*;
+use super::{build::BuildError, *};
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub enum ModError {
+    Build(#[from] BuildError),
     Filesystem(#[from] std::io::Error),
 }
 
 impl TaggedFilesystem {
-    pub fn add(&self, tag: Tag, names: FxHashSet<Name>) -> Result<Vec<PathBuf>, ModError> {
+    pub fn add(&self, tag: Tag, names: FxHashSet<Name>) -> Result<(), ModError> {
         self.r#mod([tag].into_iter().collect(), FxHashSet::default(), names)
     }
 
-    pub fn del(&self, tag: Tag, names: FxHashSet<Name>) -> Result<Vec<PathBuf>, ModError> {
+    pub fn del(&self, tag: Tag, names: FxHashSet<Name>) -> Result<(), ModError> {
         self.r#mod(FxHashSet::default(), [tag].into_iter().collect(), names)
     }
 
@@ -20,9 +21,9 @@ impl TaggedFilesystem {
         add: FxHashSet<Tag>,
         del: FxHashSet<Tag>,
         names: FxHashSet<Name>,
-    ) -> Result<Vec<PathBuf>, ModError> {
+    ) -> Result<(), ModError> {
         if add.is_empty() && del.is_empty() {
-            return Ok(vec![]);
+            return Ok(());
         }
 
         for name in &names {
@@ -40,57 +41,9 @@ impl TaggedFilesystem {
             }
         }
 
-        let (paths, other_paths) = self
-            .tagged_paths()
-            .partition::<Vec<_>, _>(|path| names.contains(path.name()));
-        let mut relevant_paths = relevant_paths(
-            paths
-                .iter()
-                .flat_map(|path| path.tags().map(|tag| tag.to_owned()))
-                .chain(add.iter().cloned())
-                .collect(),
-            other_paths,
-        );
+        self.build_some(names.into_iter().collect())?;
 
-        let mut mod_move_ops = Vec::new();
-        for path in paths {
-            let new_path = TaggedPath::from_tags(
-                &path
-                    .tags()
-                    .filter(|tag| !del.contains(*tag))
-                    .chain(add.iter().map(|tag| tag.as_ref()))
-                    .collect(),
-                path.name(),
-            );
-
-            mod_move_ops.push(MoveOp {
-                from: path.into_path(),
-                to: new_path.as_path().to_owned(),
-            });
-            relevant_paths.push(new_path);
-        }
-
-        let mut organized_move_ops = organize(&relevant_paths);
-        let mut new_paths = Vec::new();
-        for op in mod_move_ops {
-            match organized_move_ops
-                .iter_mut()
-                .find(|other| other.from == op.to)
-            {
-                Some(other) => {
-                    other.from = op.from;
-                    new_paths.push(other.to.clone());
-                }
-                None => {
-                    let to = op.to.clone();
-                    organized_move_ops.push(op);
-                    new_paths.push(to);
-                }
-            }
-        }
-
-        self.apply_all(from_move_ops(organized_move_ops))?;
-        Ok(new_paths)
+        Ok(())
     }
 }
 

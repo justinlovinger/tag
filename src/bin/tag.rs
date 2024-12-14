@@ -200,27 +200,27 @@ fn main() -> anyhow::Result<()> {
                 Some(names) => filesystem.build_some(names)?,
                 None => filesystem.build()?,
             },
-            Some(Commands::Touch { tags, name }) => print_paths([filesystem.touch(tags, name)?])?,
-            Some(Commands::Mkdir { tags, name }) => print_paths([filesystem.mkdir(tags, name)?])?,
+            Some(Commands::Touch { tags, name }) => filesystem.touch(tags, name)?,
+            Some(Commands::Mkdir { tags, name }) => filesystem.mkdir(tags, name)?,
             Some(Commands::Rm { file }) => filesystem.rm(file.into())?,
             Some(Commands::Rename { file, new_name }) => {
-                print_paths([filesystem.rename(file.into(), new_name)?])?
+                filesystem.rename(file.into(), new_name)?
             }
             // Ideally,
             // Clap would collect `add`, `del`, and `files` as the correct collections,
             // so we would not need to allocate each twice,
             // see <https://github.com/clap-rs/clap/issues/3114>.
             Some(Commands::Add { tag, files }) => {
-                print_paths(filesystem.add(tag, files.into_iter().map_into().collect())?)?
+                filesystem.add(tag, files.into_iter().map_into().collect())?
             }
             Some(Commands::Del { tag, files }) => {
-                print_paths(filesystem.del(tag, files.into_iter().map_into().collect())?)?
+                filesystem.del(tag, files.into_iter().map_into().collect())?
             }
-            Some(Commands::Mod { add, del, files }) => print_paths(filesystem.r#mod(
+            Some(Commands::Mod { add, del, files }) => filesystem.r#mod(
                 add.into_iter().collect(),
                 del.into_iter().collect(),
                 files.into_iter().map_into().collect(),
-            )?)?,
+            )?,
             Some(Commands::Find {
                 include,
                 exclude,
@@ -237,16 +237,6 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    Ok(())
-}
-
-fn print_paths(paths: impl IntoIterator<Item = PathBuf>) -> io::Result<()> {
-    let mut out = writer();
-    for path in paths {
-        // `display()` should not affect results
-        // because invalid unicode should error before here.
-        writeln!(out, "{}", path.display())?
-    }
     Ok(())
 }
 

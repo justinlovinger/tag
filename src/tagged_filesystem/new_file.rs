@@ -1,11 +1,11 @@
-use super::*;
+use super::{build::BuildError, *};
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub enum NewFileError {
     FileExists(#[from] FileExistsError),
     MetadataExists(#[from] MetadataExistsError),
-    New(#[from] TaggedPathError),
+    Build(#[from] BuildError),
     Filesystem(#[from] std::io::Error),
 }
 
@@ -19,7 +19,7 @@ impl TaggedFilesystem {
         &self,
         tags: impl IntoIterator<Item = Tag>,
         name: Name,
-    ) -> Result<PathBuf, NewFileError> {
+    ) -> Result<(), NewFileError> {
         self.new_file(NewFileType::File, tags, name)
     }
 
@@ -27,7 +27,7 @@ impl TaggedFilesystem {
         &self,
         tags: impl IntoIterator<Item = Tag>,
         name: Name,
-    ) -> Result<PathBuf, NewFileError> {
+    ) -> Result<(), NewFileError> {
         self.new_file(NewFileType::Dir, tags, name)
     }
 
@@ -36,7 +36,7 @@ impl TaggedFilesystem {
         ty: NewFileType,
         tags: impl IntoIterator<Item = Tag>,
         name: Name,
-    ) -> Result<PathBuf, NewFileError> {
+    ) -> Result<(), NewFileError> {
         let file_path = self.root.file(&name);
         if file_path.try_exists()? {
             return Err(FileExistsError.into());
@@ -47,13 +47,10 @@ impl TaggedFilesystem {
             return Err(MetadataExistsError(file_tags_path).into());
         }
 
-        let tag_set = tags.into_iter().collect();
-        let tagged_path = TaggedPath::from_tags(&tag_set, name);
-
         create_dir(&file_tags_path)?;
         let program_tags_path = file_tags_path.join(PROGRAM_TAGS_DIR);
         create_dir(&program_tags_path)?;
-        for tag in tag_set.iter() {
+        for tag in tags {
             File::create(program_tags_path.join(tag.as_path()))?;
         }
 
@@ -64,40 +61,9 @@ impl TaggedFilesystem {
             NewFileType::Dir => create_dir(&file_path)?,
         }
 
-        let mut paths = relevant_paths(tag_set, self.tagged_paths().collect());
-        let tagged_path_buf = tagged_path.as_path().to_owned();
-        paths.push(tagged_path);
+        self.build_some(vec![name])?;
 
-        let ops = from_move_ops(organize(&paths));
-
-        let mut to_path = None;
-        self.apply_all(ops.filter(|op| match op {
-            Op::EnsureDirectory(_) => true,
-            Op::Move(MoveOp { from, to }) => {
-                if from == &tagged_path_buf {
-                    to_path = Some(to.clone());
-                    false
-                } else {
-                    true
-                }
-            }
-            Op::DeleteDirectoryIfEmpty(_) => true,
-        }))?;
-
-        let path = self.root.join(match to_path {
-            Some(to_path) => to_path,
-            None => tagged_path_buf,
-        });
-
-        match ty {
-            NewFileType::File => crate::fs::symlink_file(&file_path, &path)?,
-            NewFileType::Dir => crate::fs::symlink_dir(&file_path, &path)?,
-        }
-
-        Ok(path
-            .strip_prefix(std::env::current_dir().unwrap_or_default())
-            .map(|path| path.to_owned())
-            .unwrap_or_else(|_| path.clone()))
+        Ok(())
     }
 }
 
@@ -126,10 +92,7 @@ mod tests {
     fn touch_creates_an_empty_file_with_metadata_and_a_link_if_name_is_unique() {
         with_temp_dir(|dir| {
             let filesystem = tagged_filesystem(dir);
-            assert_eq!(
-                filesystem.touch([tag("foo")], name("bar")).unwrap(),
-                dir.join("foo-_bar")
-            );
+            filesystem.touch([tag("foo")], name("bar")).unwrap();
             assert_eq!(
                 list_files(&filesystem.root),
                 [".tag/files/bar", ".tag/tags/bar/tag/foo", "foo-_bar"].map(PathBuf::from)
@@ -160,10 +123,7 @@ mod tests {
                 .unwrap()
                 .unwrap();
 
-            assert_eq!(
-                filesystem.touch([tag("foo")], name("biz")).unwrap(),
-                PathBuf::from("_biz")
-            );
+            filesystem.touch([tag("foo")], name("biz")).unwrap();
             assert_eq!(
                 list_files(&filesystem.root),
                 [
@@ -257,10 +217,8 @@ mod tests {
     fn mkdir_creates_an_empty_directory_with_metadata_and_a_link_if_name_is_unique() {
         with_temp_dir(|dir| {
             let filesystem = tagged_filesystem(dir);
-            assert_eq!(
-                filesystem.mkdir([tag("foo")], name("bar")).unwrap(),
-                dir.join("foo-_bar")
-            );
+
+            filesystem.mkdir([tag("foo")], name("bar")).unwrap();
             assert_eq!(
                 list_files(&filesystem.root),
                 [".tag/files/bar", ".tag/tags/bar/tag/foo", "foo-_bar"].map(PathBuf::from)
@@ -290,10 +248,7 @@ mod tests {
                 .unwrap()
                 .unwrap();
 
-            assert_eq!(
-                filesystem.mkdir([tag("foo")], name("biz")).unwrap(),
-                PathBuf::from("_biz")
-            );
+            filesystem.mkdir([tag("foo")], name("biz")).unwrap();
             assert_eq!(
                 list_files(&filesystem.root),
                 [

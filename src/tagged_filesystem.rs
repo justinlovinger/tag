@@ -19,7 +19,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::{
     fs::{copy_dir, symlink_dir, symlink_file},
     organize::organize,
-    tagged_path::TaggedPathError,
     Name, NameRef, Root, Tag, TaggedPath, FILES_DIR, METADATA_DIR, PROGRAM_TAGS_DIR, TAGS_DIR,
 };
 
@@ -240,9 +239,6 @@ mod tests {
 
             filesystem
                 .del(tag.clone(), [path.name().to_owned()].into_iter().collect())
-                .unwrap()
-                .into_iter()
-                .next()
                 .unwrap();
             filesystem
                 .add(tag, [path.name().to_owned()].into_iter().collect())
@@ -271,9 +267,6 @@ mod tests {
 
             filesystem
                 .add(tag.clone(), [path.name().to_owned()].into_iter().collect())
-                .unwrap()
-                .into_iter()
-                .next()
                 .unwrap();
             filesystem
                 .del(tag, [path.name().to_owned()].into_iter().collect())
