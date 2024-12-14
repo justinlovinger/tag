@@ -9,16 +9,18 @@ pub enum NewFileError {
     Filesystem(#[from] std::io::Error),
 }
 
+enum NewFileType {
+    File,
+    Dir,
+}
+
 impl TaggedFilesystem {
     pub fn touch(
         &self,
         tags: impl IntoIterator<Item = Tag>,
         name: Name,
     ) -> Result<PathBuf, NewFileError> {
-        let (tagged_path, file_path, path_to_print) = self.new_file(tags, name)?;
-        symlink_file(&file_path, tagged_path)?;
-        File::create(&file_path)?;
-        Ok(path_to_print)
+        self.new_file(NewFileType::File, tags, name)
     }
 
     pub fn mkdir(
@@ -26,18 +28,15 @@ impl TaggedFilesystem {
         tags: impl IntoIterator<Item = Tag>,
         name: Name,
     ) -> Result<PathBuf, NewFileError> {
-        let (tagged_path, file_path, path_to_print) = self.new_file(tags, name)?;
-        crate::fs::symlink_dir(&file_path, tagged_path)?;
-        create_dir(&file_path)?;
-        Ok(path_to_print)
+        self.new_file(NewFileType::Dir, tags, name)
     }
 
-    /// Return (tagged_path, file_path, path_to_print)
     fn new_file(
         &self,
+        ty: NewFileType,
         tags: impl IntoIterator<Item = Tag>,
         name: Name,
-    ) -> Result<(PathBuf, PathBuf, PathBuf), NewFileError> {
+    ) -> Result<PathBuf, NewFileError> {
         let file_path = self.root.file(&name);
         if file_path.try_exists()? {
             return Err(FileExistsError.into());
@@ -56,6 +55,13 @@ impl TaggedFilesystem {
         create_dir(&program_tags_path)?;
         for tag in tag_set.iter() {
             File::create(program_tags_path.join(tag.as_path()))?;
+        }
+
+        match ty {
+            NewFileType::File => {
+                File::create(&file_path)?;
+            }
+            NewFileType::Dir => create_dir(&file_path)?,
         }
 
         let mut paths = relevant_paths(tag_set, self.tagged_paths().collect());
@@ -78,15 +84,20 @@ impl TaggedFilesystem {
             Op::DeleteDirectoryIfEmpty(_) => true,
         }))?;
 
-        let to_path = self.root.join(match to_path {
+        let path = self.root.join(match to_path {
             Some(to_path) => to_path,
             None => tagged_path_buf,
         });
-        let path_to_print = to_path
+
+        match ty {
+            NewFileType::File => crate::fs::symlink_file(&file_path, &path)?,
+            NewFileType::Dir => crate::fs::symlink_dir(&file_path, &path)?,
+        }
+
+        Ok(path
             .strip_prefix(std::env::current_dir().unwrap_or_default())
             .map(|path| path.to_owned())
-            .unwrap_or_else(|_| to_path.clone());
-        Ok((to_path, file_path, path_to_print))
+            .unwrap_or_else(|_| path.clone()))
     }
 }
 
