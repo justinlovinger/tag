@@ -21,7 +21,7 @@ fn main() {
     let args = Args::parse();
 
     match args.command {
-        Some(Commands::Tags { path }) => println!("{}", path.tags().format("\n")),
+        Some(Commands::Tags { path }) => print!("{}", path.tags().format("\n")),
         Some(Commands::Name { path }) => println!("{}", path.name()),
         None => {}
     }
