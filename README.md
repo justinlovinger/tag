@@ -1,5 +1,9 @@
 [![Workflow Status](https://github.com/justinlovinger/tag/workflows/build/badge.svg)](https://github.com/justinlovinger/tag/actions?query=workflow%3A%22build%22)
 
+Note: this utility is in the middle of a major rewrite,
+including breaking changes to syntax.
+See `pre-metadata` for the old and stable version.
+
 # Tag
 
 A utility to automatically organize files with a simple tagging system.
