@@ -1,4 +1,8 @@
-use crate::{name::NameError, tag::TagError};
+use crate::{
+    fs::{remove_symlink, RemoveSymlinkError},
+    name::NameError,
+    tag::TagError,
+};
 
 use super::*;
 
@@ -48,7 +52,7 @@ pub struct StringFromPathError(PathBuf);
 
 #[derive(Debug, thiserror::Error)]
 #[error("Error removing tagged path `{0}`: {1}")]
-pub struct RemovePathError(PathBuf, std::io::Error);
+pub struct RemovePathError(PathBuf, RemoveSymlinkError);
 
 struct BuildPaths {
     paths: Vec<TaggedPath>,
@@ -277,7 +281,7 @@ impl TaggedFilesystem {
         new_paths: impl IntoIterator<Item = PathBuf>,
     ) -> Result<(), ApplyError> {
         for path in excluded_paths {
-            remove_file(self.root.join(&path)).map_err(|e| RemovePathError(path.into(), e))?;
+            remove_symlink(self.root.join(&path)).map_err(|e| RemovePathError(path.into(), e))?;
         }
 
         self.apply_all(ops)?;
@@ -762,6 +766,59 @@ mod tests {
         });
 
         prop_assert_eq!(actual, expected)
+    }
+
+    #[test]
+    fn build_errors_on_non_link_paths() {
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, ["a-_foo"]);
+            File::create(filesystem.root.join("_bar")).unwrap();
+            assert!(filesystem.build().is_err());
+            assert_eq!(
+                list_files(filesystem.root),
+                [".tag/files/foo", ".tag/tags/foo/tag/a", "_bar", "a-_foo"].map(PathBuf::from),
+            )
+        });
+
+        with_temp_dir(|dir| {
+            let filesystem = tagged_filesystem_with(dir, ["a-_foo"]);
+            create_dir(filesystem.root.join("_bar")).unwrap();
+            assert!(filesystem.build().is_err());
+            assert_eq!(
+                list_files(filesystem.root),
+                [".tag/files/foo", ".tag/tags/foo/tag/a", "_bar", "a-_foo"].map(PathBuf::from),
+            )
+        });
+
+        // The following two cases can erroneously succeed
+        // if the link is deleted and the non-link is renamed.
+        // However,
+        // this is difficult to check for,
+        // and no data is deleted.
+        // So,
+        // it is considered acceptable.
+        //
+        // ```
+        // with_temp_dir(|dir| {
+        //     let filesystem = tagged_filesystem_with(dir, ["a-_foo"]);
+        //     File::create(filesystem.root.join("_foo")).unwrap();
+        //     assert!(filesystem.build().is_err());
+        //     assert_eq!(
+        //         list_files(filesystem.root),
+        //         [".tag/files/foo", ".tag/tags/foo/tag/a", "_foo", "a-_foo"].map(PathBuf::from),
+        //     )
+        // });
+        //
+        // with_temp_dir(|dir| {
+        //     let filesystem = tagged_filesystem_with(dir, ["a-_foo"]);
+        //     create_dir(filesystem.root.join("_foo")).unwrap();
+        //     assert!(filesystem.build().is_err());
+        //     assert_eq!(
+        //         list_files(filesystem.root),
+        //         [".tag/files/foo", ".tag/tags/foo/tag/a", "_foo", "a-_foo"].map(PathBuf::from),
+        //     )
+        // });
+        // ```
     }
 
     #[proptest(cases = 20)]

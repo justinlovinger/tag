@@ -36,6 +36,39 @@ where
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub enum RemoveSymlinkError {
+    #[error("Not a symlink")]
+    NotSymlinkError,
+    Filesystem(#[from] std::io::Error),
+}
+
+pub fn remove_symlink<P>(path: P) -> Result<(), RemoveSymlinkError>
+where
+    P: AsRef<Path>,
+{
+    if symlink_metadata(path.as_ref())?.is_symlink() {
+        #[cfg(target_family = "unix")]
+        {
+            std::fs::remove_file(path)?;
+        }
+
+        #[cfg(target_family = "windows")]
+        {
+            if path.is_dir() {
+                std::fs::remove_dir(path)?;
+            } else {
+                std::fs::remove_file(path)?;
+            }
+        }
+
+        Ok(())
+    } else {
+        Err(RemoveSymlinkError::NotSymlinkError)
+    }
+}
+
 pub fn copy_dir<P, Q>(from: P, to: Q) -> std::io::Result<()>
 where
     P: AsRef<Path>,
