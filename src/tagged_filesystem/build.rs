@@ -7,6 +7,7 @@ use super::*;
 pub enum BuildError {
     Names(#[from] NamesError),
     Tags(#[from] TagsError),
+    Apply(#[from] ApplyError),
     Filesystem(#[from] std::io::Error),
 }
 
@@ -27,6 +28,13 @@ pub enum TagsError {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub enum ApplyError {
+    RemoveTaggedPath(#[from] RemovePathError),
+    Filesystem(#[from] std::io::Error),
+}
+
+#[derive(Debug, thiserror::Error)]
 #[error("{0}. Name is from `{1}`.")]
 pub struct NameFromPathError(NameError, PathBuf);
 
@@ -37,6 +45,10 @@ pub struct TagFromPathError(TagError, PathBuf);
 #[derive(Debug, thiserror::Error)]
 #[error("`{0}` is not a valid Unicode string")]
 pub struct StringFromPathError(PathBuf);
+
+#[derive(Debug, thiserror::Error)]
+#[error("Error removing tagged path `{0}`: {1}")]
+pub struct RemovePathError(PathBuf, std::io::Error);
 
 struct BuildPaths {
     paths: Vec<TaggedPath>,
@@ -263,9 +275,9 @@ impl TaggedFilesystem {
         ops: impl IntoIterator<Item = Op>,
         excluded_paths: impl IntoIterator<Item = TaggedPath>,
         new_paths: impl IntoIterator<Item = PathBuf>,
-    ) -> std::io::Result<()> {
+    ) -> Result<(), ApplyError> {
         for path in excluded_paths {
-            remove_file(self.root.join(path))?
+            remove_file(self.root.join(&path)).map_err(|e| RemovePathError(path.into(), e))?;
         }
 
         self.apply_all(ops)?;
