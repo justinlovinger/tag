@@ -13,10 +13,7 @@ mod fs {
     use std::{
         fs::{create_dir_all, File},
         path::Path,
-        sync::{Arc, Mutex},
     };
-
-    use once_cell::sync::Lazy;
 
     pub fn with_temp_dir<F, T>(f: F) -> T
     where
@@ -26,26 +23,6 @@ mod fs {
         let res = (f)(dir.path());
         dir.close().unwrap();
         res
-    }
-
-    pub fn with_temp_cwd<F, T>(f: F) -> T
-    where
-        F: FnOnce() -> T,
-    {
-        // Working directory is not per-thread.
-        static LOCK: Lazy<Arc<Mutex<()>>> = Lazy::new(|| Arc::new(Mutex::new(())));
-
-        with_temp_dir(|dir| {
-            // Lock may get poisoned from panicking tests, but that is ok.
-            let lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
-            std::env::set_current_dir(dir).unwrap();
-            let res = (f)();
-
-            drop(lock);
-
-            res
-        })
     }
 
     pub fn make_file_and_parent<P>(path: P)
@@ -62,41 +39,11 @@ mod fs {
 }
 
 mod tagged_filesystem {
-    use std::path::Path;
-
     use proptest::prelude::{prop::collection::vec, *};
 
-    use crate::{TaggedFilesystem, TaggedPath};
+    use crate::TaggedPath;
 
     use super::TaggedPathParams;
-
-    pub fn tagged_filesystem<P>(dir: P) -> TaggedFilesystem
-    where
-        P: AsRef<Path>,
-    {
-        TaggedFilesystem::init(dir).unwrap()
-    }
-
-    pub fn tagged_filesystem_with<P, Q>(
-        dir: P,
-        paths: impl IntoIterator<Item = Q>,
-    ) -> TaggedFilesystem
-    where
-        P: AsRef<Path>,
-        Q: AsRef<Path>,
-    {
-        let filesystem = TaggedFilesystem::init(dir).unwrap();
-        for path in paths.into_iter() {
-            let tagged_path = TaggedPath::from_path(path.as_ref().to_owned()).unwrap();
-            filesystem
-                .touch(
-                    tagged_path.tags().map(|tag| tag.to_owned()),
-                    tagged_path.name().to_owned(),
-                )
-                .unwrap();
-        }
-        filesystem
-    }
 
     pub struct TaggedPathsParams {
         pub tagged_path_params: TaggedPathParams,

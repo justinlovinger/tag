@@ -397,17 +397,16 @@ fn build_ops<'a>(
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
+    use std::fs::{remove_file, File};
 
     use proptest::prelude::{prop::collection::vec, *};
     use test_strategy::proptest;
 
     use crate::{
-        tagged_filesystem::tests::{list_files, list_tagged_paths},
-        testing::{
-            make_file_and_parent, tagged_filesystem, tagged_filesystem_with, with_temp_dir,
-            TaggedPaths,
+        tagged_filesystem::testing::{
+            list_files, list_tagged_paths, tagged_filesystem, tagged_filesystem_with,
         },
+        testing::{make_file_and_parent, with_temp_dir, TaggedPaths},
         Tag,
     };
 
@@ -439,7 +438,7 @@ mod tests {
         let (actual, expected) = with_temp_dir(|dir| {
             let filesystem = tagged_filesystem_with(dir, paths);
             for name in &names {
-                filesystem.touch([], name.clone()).unwrap();
+                filesystem.touch([], name.clone());
             }
 
             let expected = list_files(&filesystem.root);
@@ -461,7 +460,7 @@ mod tests {
         let (actual, expected) = with_temp_dir(|dir| {
             let filesystem = tagged_filesystem_with(dir, paths);
             for name in &names {
-                filesystem.touch([], name.clone()).unwrap();
+                filesystem.touch([], name.clone());
             }
 
             let expected = list_files(&filesystem.root);
@@ -486,12 +485,10 @@ mod tests {
             let expected = list_files(&filesystem.root);
 
             for path in other_paths {
-                filesystem
-                    .touch(
-                        path.tags().map(|tag| tag.to_owned()),
-                        path.name().to_owned(),
-                    )
-                    .unwrap();
+                filesystem.touch(
+                    path.tags().map(|tag| tag.to_owned()),
+                    path.name().to_owned(),
+                );
                 remove_file(filesystem.root.file(path.name())).unwrap();
                 remove_dir_all(filesystem.root.file_tags(path.name())).unwrap();
             }
@@ -563,13 +560,11 @@ mod tests {
             let expected = list_files(&filesystem.root);
 
             for (path, tag) in other_paths.into_iter().zip(extra_tags) {
-                filesystem.rm(path.name().to_owned()).unwrap();
-                filesystem
-                    .touch(
-                        path.tags().map(|tag| tag.to_owned()).chain([tag.clone()]),
-                        path.name().to_owned(),
-                    )
-                    .unwrap();
+                filesystem.rm(path.name().to_owned());
+                filesystem.touch(
+                    path.tags().map(|tag| tag.to_owned()).chain([tag.clone()]),
+                    path.name().to_owned(),
+                );
                 remove_file(filesystem.root.tag(path.name(), tag)).unwrap();
             }
             filesystem.build().unwrap();
@@ -610,24 +605,20 @@ mod tests {
         let (actual, expected) = with_temp_dir(|dir| {
             let filesystem = tagged_filesystem_with(dir, paths);
             for (path, tag) in other_paths.iter().zip(&missing_tags) {
-                filesystem
-                    .touch(
-                        path.tags().map(|tag| tag.to_owned()).chain([tag.clone()]),
-                        path.name().to_owned(),
-                    )
-                    .unwrap();
+                filesystem.touch(
+                    path.tags().map(|tag| tag.to_owned()).chain([tag.clone()]),
+                    path.name().to_owned(),
+                );
             }
 
             let expected = list_files(&filesystem.root);
 
             for (path, tag) in other_paths.iter().zip(&missing_tags) {
-                filesystem.rm(path.name().to_owned()).unwrap();
-                filesystem
-                    .touch(
-                        path.tags().map(|tag| tag.to_owned()),
-                        path.name().to_owned(),
-                    )
-                    .unwrap();
+                filesystem.rm(path.name().to_owned());
+                filesystem.touch(
+                    path.tags().map(|tag| tag.to_owned()),
+                    path.name().to_owned(),
+                );
                 File::create(filesystem.root.tag(path.name(), tag)).unwrap();
             }
             filesystem.build().unwrap();
@@ -742,19 +733,15 @@ mod tests {
         let (actual, expected) = with_temp_dir(|dir| {
             let filesystem = tagged_filesystem(dir);
             for dir in dirs.0.iter() {
-                filesystem
-                    .mkdir(dir.tags().map(|tag| tag.to_owned()), dir.name().to_owned())
-                    .unwrap();
+                filesystem.mkdir(dir.tags().map(|tag| tag.to_owned()), dir.name().to_owned());
             }
             for (dir, paths) in read_paths(filesystem.root.files()).unwrap().zip(dirs_paths) {
                 let filesystem = TaggedFilesystem::init(dir).unwrap();
                 for path in paths {
-                    filesystem
-                        .touch(
-                            path.tags().map(|tag| tag.to_owned()),
-                            path.name().to_owned(),
-                        )
-                        .unwrap();
+                    filesystem.touch(
+                        path.tags().map(|tag| tag.to_owned()),
+                        path.name().to_owned(),
+                    );
                 }
             }
             let expected = list_files(&filesystem.root);
@@ -986,10 +973,10 @@ mod tests {
         let (actual, expected) = with_temp_dir(|dir| {
             let filesystem = tagged_filesystem_with(dir, paths);
             for name in &considered_names {
-                filesystem.touch([], name.clone()).unwrap();
+                filesystem.touch([], name.clone());
             }
             for name in &ignored_names {
-                filesystem.touch([], name.clone()).unwrap();
+                filesystem.touch([], name.clone());
                 remove_dir_all(filesystem.root.file_tags(name)).unwrap();
             }
 
@@ -1016,10 +1003,10 @@ mod tests {
         let (actual, expected) = with_temp_dir(|dir| {
             let filesystem = tagged_filesystem_with(dir, paths);
             for name in &considered_names {
-                filesystem.touch([], name.clone()).unwrap();
+                filesystem.touch([], name.clone());
             }
             for name in &ignored_names {
-                filesystem.touch([], name.clone()).unwrap();
+                filesystem.touch([], name.clone());
                 remove_dir(filesystem.root.program_tags(name)).unwrap();
             }
 
@@ -1046,12 +1033,10 @@ mod tests {
         let (actual, expected) = with_temp_dir(|dir| {
             let filesystem = tagged_filesystem_with(dir, paths);
             for path in ignored_paths {
-                filesystem
-                    .touch(
-                        path.tags().map(|tag| tag.to_owned()),
-                        path.name().to_owned(),
-                    )
-                    .unwrap();
+                filesystem.touch(
+                    path.tags().map(|tag| tag.to_owned()),
+                    path.name().to_owned(),
+                );
                 remove_file(filesystem.root.file(path.name())).unwrap();
                 remove_dir_all(filesystem.root.file_tags(path.name())).unwrap();
             }
@@ -1059,12 +1044,10 @@ mod tests {
             let expected = list_files(&filesystem.root);
 
             for path in &considered_paths {
-                filesystem
-                    .touch(
-                        path.tags().map(|tag| tag.to_owned()),
-                        path.name().to_owned(),
-                    )
-                    .unwrap();
+                filesystem.touch(
+                    path.tags().map(|tag| tag.to_owned()),
+                    path.name().to_owned(),
+                );
                 remove_file(filesystem.root.file(path.name())).unwrap();
                 remove_dir_all(filesystem.root.file_tags(path.name())).unwrap();
             }
@@ -1184,13 +1167,11 @@ mod tests {
             let expected = list_files(&filesystem.root);
 
             for (path, tag) in considered_paths.iter().zip(considered_extra_tags) {
-                filesystem.rm(path.name().to_owned()).unwrap();
-                filesystem
-                    .touch(
-                        path.tags().map(|tag| tag.to_owned()).chain([tag.clone()]),
-                        path.name().to_owned(),
-                    )
-                    .unwrap();
+                filesystem.rm(path.name().to_owned());
+                filesystem.touch(
+                    path.tags().map(|tag| tag.to_owned()).chain([tag.clone()]),
+                    path.name().to_owned(),
+                );
                 remove_file(filesystem.root.tag(path.name(), tag)).unwrap();
             }
             filesystem
@@ -1260,12 +1241,10 @@ mod tests {
         let (actual, expected) = with_temp_dir(|dir| {
             let filesystem = tagged_filesystem_with(dir, paths.iter().chain(&ignored_paths));
             for (path, tag) in considered_paths.iter().zip(&considered_missing_tags) {
-                filesystem
-                    .touch(
-                        path.tags().map(|tag| tag.to_owned()).chain([tag.clone()]),
-                        path.name().to_owned(),
-                    )
-                    .unwrap();
+                filesystem.touch(
+                    path.tags().map(|tag| tag.to_owned()).chain([tag.clone()]),
+                    path.name().to_owned(),
+                );
             }
             for (path, tag) in ignored_paths.iter().zip(&ignored_missing_tags) {
                 File::create(filesystem.root.tag(path.name(), tag)).unwrap();
@@ -1274,13 +1253,11 @@ mod tests {
             let expected = list_files(&filesystem.root);
 
             for (path, tag) in considered_paths.iter().zip(&considered_missing_tags) {
-                filesystem.rm(path.name().to_owned()).unwrap();
-                filesystem
-                    .touch(
-                        path.tags().map(|tag| tag.to_owned()),
-                        path.name().to_owned(),
-                    )
-                    .unwrap();
+                filesystem.rm(path.name().to_owned());
+                filesystem.touch(
+                    path.tags().map(|tag| tag.to_owned()),
+                    path.name().to_owned(),
+                );
                 File::create(filesystem.root.tag(path.name(), tag)).unwrap();
             }
             filesystem

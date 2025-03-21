@@ -55,8 +55,8 @@ mod tests {
     use std::fs::File;
 
     use crate::{
-        tagged_filesystem::tests::list_files,
-        testing::{name, tag, tagged_filesystem_with, with_temp_dir},
+        tagged_filesystem::testing::{list_files, tagged_filesystem_with},
+        testing::{name, tag, with_temp_dir},
     };
 
     use super::*;
@@ -76,7 +76,7 @@ mod tests {
     fn init_initializes_a_nested_tagged_filesystem_from_files_dir() {
         with_temp_dir(|dir| {
             let filesystem = TaggedFilesystem::init(dir).unwrap();
-            filesystem.mkdir([tag("foo")], name("bar")).unwrap();
+            filesystem.mkdir([tag("foo")], name("bar"));
             assert!(TaggedFilesystem::init(filesystem.root.file(name("bar"))).is_ok());
             assert_eq!(
                 list_files(filesystem.root),
@@ -96,7 +96,7 @@ mod tests {
     fn init_initializes_a_nested_tagged_filesystem_from_tagged_path() {
         with_temp_dir(|dir| {
             let filesystem = TaggedFilesystem::init(dir).unwrap();
-            filesystem.mkdir([tag("foo")], name("bar")).unwrap();
+            filesystem.mkdir([tag("foo")], name("bar"));
             assert!(TaggedFilesystem::init(filesystem.root.join("foo-_bar")).is_ok());
             assert_eq!(
                 list_files(filesystem.root),

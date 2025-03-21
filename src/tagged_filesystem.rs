@@ -1,15 +1,13 @@
 mod build;
-mod errors;
 mod find;
 mod init;
-mod r#mod;
-mod new_file;
 mod op;
-mod rename;
-mod rm;
+
+#[cfg(test)]
+mod testing;
 
 use std::{
-    fs::{create_dir, create_dir_all, remove_dir, remove_dir_all, remove_file, rename, File},
+    fs::{create_dir, create_dir_all, remove_dir, remove_dir_all, rename},
     path::{Path, PathBuf},
 };
 
@@ -17,12 +15,11 @@ use itertools::Itertools;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
-    fs::{copy_dir, symlink_dir, symlink_file},
+    fs::{symlink_dir, symlink_file},
     organize::organize,
-    Name, NameRef, Root, Tag, TaggedPath, FILES_DIR, METADATA_DIR, PROGRAM_TAGS_DIR, TAGS_DIR,
+    Name, NameRef, Root, Tag, TaggedPath, FILES_DIR, METADATA_DIR, TAGS_DIR,
 };
 
-pub use self::errors::*;
 pub(crate) use self::op::*;
 
 #[derive(Debug)]
@@ -164,154 +161,4 @@ where
     P: AsRef<Path>,
 {
     Ok(std::fs::read_dir(dir)?.map(|res| res.unwrap().path()))
-}
-
-#[cfg(test)]
-mod tests {
-    use proptest::prelude::*;
-    use test_strategy::proptest;
-
-    use crate::{
-        testing::{tagged_filesystem_with, with_temp_dir, TaggedPaths},
-        Tag,
-    };
-
-    use super::*;
-
-    #[proptest]
-    fn rm_inverses_touch(paths: TaggedPaths, path: TaggedPath) {
-        let (actual, expected) = with_temp_dir(|dir| {
-            let filesystem = tagged_filesystem_with(dir, paths);
-
-            let expected = list_files(&filesystem.root);
-
-            filesystem
-                .touch(
-                    path.tags().map(|tag| tag.to_owned()),
-                    path.name().to_owned(),
-                )
-                .unwrap();
-            filesystem.rm(path.name().to_owned()).unwrap();
-            let actual = list_files(&filesystem.root);
-
-            (actual, expected)
-        });
-
-        prop_assert_eq!(actual, expected)
-    }
-
-    #[proptest]
-    fn rm_inverses_mkdir(paths: TaggedPaths, path: TaggedPath) {
-        let (actual, expected) = with_temp_dir(|dir| {
-            let filesystem = tagged_filesystem_with(dir, paths);
-
-            let expected = list_files(&filesystem.root);
-
-            filesystem
-                .mkdir(
-                    path.tags().map(|tag| tag.to_owned()),
-                    path.name().to_owned(),
-                )
-                .unwrap();
-            filesystem.rm(path.name().to_owned()).unwrap();
-            let actual = list_files(&filesystem.root);
-
-            (actual, expected)
-        });
-
-        prop_assert_eq!(actual, expected)
-    }
-
-    #[proptest(cases = 20)]
-    fn add_inverses_del(paths: TaggedPaths, path: TaggedPath, tag: Tag) {
-        let (actual, expected) = with_temp_dir(|dir| {
-            let filesystem = tagged_filesystem_with(dir, paths);
-            filesystem
-                .touch(
-                    path.tags()
-                        .filter(|path_tag| path_tag != &tag.as_ref())
-                        .map(|x| x.to_owned())
-                        .chain([tag.clone()]),
-                    path.name().to_owned(),
-                )
-                .unwrap();
-            let expected = list_files(&filesystem.root);
-
-            filesystem
-                .del(tag.clone(), [path.name().to_owned()].into_iter().collect())
-                .unwrap();
-            filesystem
-                .add(tag, [path.name().to_owned()].into_iter().collect())
-                .unwrap();
-            let actual = list_files(&filesystem.root);
-
-            (actual, expected)
-        });
-
-        prop_assert_eq!(actual, expected)
-    }
-
-    #[proptest(cases = 20)]
-    fn del_inverses_add(paths: TaggedPaths, path: TaggedPath, tag: Tag) {
-        let (actual, expected) = with_temp_dir(|dir| {
-            let filesystem = tagged_filesystem_with(dir, paths);
-            filesystem
-                .touch(
-                    path.tags()
-                        .filter(|path_tag| path_tag != &tag.as_ref())
-                        .map(|x| x.to_owned()),
-                    path.name().to_owned(),
-                )
-                .unwrap();
-            let expected = list_files(&filesystem.root);
-
-            filesystem
-                .add(tag.clone(), [path.name().to_owned()].into_iter().collect())
-                .unwrap();
-            filesystem
-                .del(tag, [path.name().to_owned()].into_iter().collect())
-                .unwrap();
-            let actual = list_files(&filesystem.root);
-
-            (actual, expected)
-        });
-
-        prop_assert_eq!(actual, expected)
-    }
-
-    pub fn list_tagged_paths<P>(path: P) -> Vec<PathBuf>
-    where
-        P: AsRef<Path>,
-    {
-        list_files_(
-            path.as_ref(),
-            read_paths(path.as_ref())
-                .unwrap()
-                .filter(|path| !path.ends_with(METADATA_DIR))
-                .collect(),
-        )
-    }
-
-    pub fn list_files<P>(path: P) -> Vec<PathBuf>
-    where
-        P: AsRef<Path>,
-    {
-        list_files_(path.as_ref(), read_paths(path.as_ref()).unwrap().collect())
-    }
-
-    fn list_files_(root: &Path, mut queue: Vec<PathBuf>) -> Vec<PathBuf> {
-        let mut files = Vec::new();
-        while let Some(file) = queue.pop() {
-            if file.is_dir() && std::fs::read_dir(&file).unwrap().next().is_some() {
-                queue.extend(read_paths(file).unwrap());
-            } else {
-                files.push(file);
-            }
-        }
-        for file in &mut files {
-            *file = file.strip_prefix(root).unwrap().to_owned();
-        }
-        files.sort();
-        files
-    }
 }

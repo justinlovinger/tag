@@ -19,7 +19,10 @@ impl TaggedFilesystem {
 
 #[cfg(test)]
 mod tests {
-    use crate::testing::{tag, tagged_filesystem_with, with_temp_dir};
+    use crate::{
+        tagged_filesystem::testing::tagged_filesystem_with,
+        testing::{tag, with_temp_dir},
+    };
 
     use super::*;
 

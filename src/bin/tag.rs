@@ -57,82 +57,6 @@ enum Commands {
         #[clap(required = false, value_name = "NAME")]
         names: Option<Vec<Name>>,
     },
-    /// Create an empty file with the given tags and name
-    Touch {
-        /// Tags to add to the file
-        #[clap(value_name = "TAG")]
-        tags: Vec<Tag>,
-
-        /// Name of the file
-        #[clap(required = true, value_name = "NAME")]
-        name: Name,
-    },
-    /// Create an empty directory with the given tags and name
-    Mkdir {
-        /// Tags to add to the directory
-        #[clap(value_name = "TAG")]
-        tags: Vec<Tag>,
-
-        /// Name of the directory
-        #[clap(required = true, value_name = "NAME")]
-        name: Name,
-    },
-    /// Remove a tagged file or directory
-    ///
-    /// Tags for the file will also be removed.
-    Rm {
-        /// File to remove
-        #[clap(required = true, value_name = "PATH|NAME")]
-        file: PathOrName,
-    },
-    /// Change the name of a tagged file or directory
-    ///
-    /// Tags remain unchanged.
-    Rename {
-        /// File or directory to rename
-        #[clap(required = true, value_name = "PATH|NAME")]
-        file: PathOrName,
-
-        /// New name
-        #[clap(required = true, value_name = "NEW_NAME")]
-        new_name: Name,
-    },
-    /// Add tags to files and print new tagged paths
-    Add {
-        /// Tag to add
-        #[clap(required = true, value_name = "TAG")]
-        tag: Tag,
-
-        /// Files to tag
-        #[clap(required = true, value_name = "PATH|NAME")]
-        files: Vec<PathOrName>,
-    },
-    /// Delete tags from files and print new tagged paths
-    Del {
-        /// Tag to delete
-        #[clap(required = true, value_name = "TAG")]
-        tag: Tag,
-
-        /// Files to delete tag from
-        #[clap(required = true, value_name = "PATH|NAME")]
-        files: Vec<PathOrName>,
-    },
-    /// Add and delete tags from files and print new tagged paths
-    ///
-    /// Adding tags takes precedence over deleting.
-    Mod {
-        /// Tags to add
-        #[clap(short, long, value_name = "TAG")]
-        add: Vec<Tag>,
-
-        /// Tags to delete
-        #[clap(short, long, value_name = "TAG")]
-        del: Vec<Tag>,
-
-        /// Files to modify
-        #[clap(required = true, value_name = "PATH|NAME")]
-        files: Vec<PathOrName>,
-    },
     /// Print tagged paths of files with given tags
     Find {
         /// Find files including *all* these tags
@@ -200,27 +124,6 @@ fn main() -> anyhow::Result<()> {
                 Some(names) => filesystem.build_some(names)?,
                 None => filesystem.build()?,
             },
-            Some(Commands::Touch { tags, name }) => filesystem.touch(tags, name)?,
-            Some(Commands::Mkdir { tags, name }) => filesystem.mkdir(tags, name)?,
-            Some(Commands::Rm { file }) => filesystem.rm(file.into())?,
-            Some(Commands::Rename { file, new_name }) => {
-                filesystem.rename(file.into(), new_name)?
-            }
-            // Ideally,
-            // Clap would collect `add`, `del`, and `files` as the correct collections,
-            // so we would not need to allocate each twice,
-            // see <https://github.com/clap-rs/clap/issues/3114>.
-            Some(Commands::Add { tag, files }) => {
-                filesystem.add(tag, files.into_iter().map_into().collect())?
-            }
-            Some(Commands::Del { tag, files }) => {
-                filesystem.del(tag, files.into_iter().map_into().collect())?
-            }
-            Some(Commands::Mod { add, del, files }) => filesystem.r#mod(
-                add.into_iter().collect(),
-                del.into_iter().collect(),
-                files.into_iter().map_into().collect(),
-            )?,
             Some(Commands::Find {
                 include,
                 exclude,
