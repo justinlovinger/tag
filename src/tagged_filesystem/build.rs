@@ -63,9 +63,7 @@ struct BuildPaths {
 
 impl TaggedFilesystem {
     pub fn build(&self) -> Result<(), BuildError> {
-        let names = self.all_names(self.root.files())?;
-        self.clean_tag_directories(&names, &self.all_names(self.root.tags())?)?;
-        self.clean_tagged_paths(self.all_build_paths(&names)?)
+        self.clean_tagged_paths(self.all_build_paths(&self.all_names(self.root.files())?)?)
     }
 
     fn all_names<P>(&self, dir: P) -> Result<FxHashSet<Name>, NamesError>
@@ -123,12 +121,10 @@ impl TaggedFilesystem {
     }
 
     pub fn build_some(&self, considered_names: Vec<Name>) -> Result<(), BuildError> {
-        let names = self.some_names(self.root.files(), &considered_names)?;
-        self.clean_tag_directories(
-            &names,
-            &self.some_names(self.root.tags(), &considered_names)?,
-        )?;
-        self.clean_tagged_paths(self.some_build_paths(&names, &considered_names)?)
+        self.clean_tagged_paths(self.some_build_paths(
+            &self.some_names(self.root.files(), &considered_names)?,
+            &considered_names,
+        )?)
     }
 
     fn some_names<'a, P>(
@@ -215,57 +211,6 @@ impl TaggedFilesystem {
         })
     }
 
-    fn clean_tag_directories<N>(
-        &self,
-        names: &FxHashSet<N>,
-        tag_names: &FxHashSet<N>,
-    ) -> Result<(), BuildError>
-    where
-        N: AsRef<NameRef> + std::hash::Hash + Eq,
-    {
-        self.remove_tag_directories(names, tag_names)?;
-        self.create_tag_directories(names, tag_names)?;
-        Ok(())
-    }
-
-    fn remove_tag_directories<N>(
-        &self,
-        names: &FxHashSet<N>,
-        tag_names: &FxHashSet<N>,
-    ) -> Result<(), BuildError>
-    where
-        N: AsRef<NameRef> + std::hash::Hash + Eq,
-    {
-        for name in tag_names {
-            if !names.contains(name) {
-                remove_dir_all(self.root.file_tags(name))?;
-            }
-        }
-        Ok(())
-    }
-
-    fn create_tag_directories<N>(
-        &self,
-        names: &FxHashSet<N>,
-        tag_names: &FxHashSet<N>,
-    ) -> Result<(), BuildError>
-    where
-        N: AsRef<NameRef> + std::hash::Hash + Eq,
-    {
-        for name in names {
-            if !tag_names.contains(name) {
-                create_dir(self.root.file_tags(name))?;
-                create_dir(self.root.program_tags(name))?;
-            } else {
-                let program_tags = self.root.program_tags(name);
-                if !program_tags.try_exists()? {
-                    create_dir(program_tags)?;
-                }
-            }
-        }
-        Ok(())
-    }
-
     fn clean_tagged_paths(&self, build_paths: BuildPaths) -> Result<(), BuildError> {
         let move_ops = build_move_ops(build_paths.paths, build_paths.path_modifications_rev);
         let (ops, new_paths) =
@@ -306,24 +251,32 @@ impl TaggedFilesystem {
     where
         N: AsRef<NameRef>,
     {
-        let mut tags = FxHashSet::default();
-        for namespace in read_paths(self.root.file_tags(name))? {
-            for entry in std::fs::read_dir(namespace)? {
-                let entry = entry?;
-                match entry.file_name().into_string() {
-                    Ok(s) => match Tag::new(s) {
-                        Ok(tag) => {
-                            tags.insert(tag);
+        match read_paths(self.root.file_tags(name)) {
+            Ok(paths) => {
+                let mut tags = FxHashSet::default();
+                for namespace in paths {
+                    for entry in std::fs::read_dir(namespace)? {
+                        let entry = entry?;
+                        match entry.file_name().into_string() {
+                            Ok(s) => match Tag::new(s) {
+                                Ok(tag) => {
+                                    tags.insert(tag);
+                                }
+                                Err(e) => return Err(TagFromPathError(e, entry.path()).into()),
+                            },
+                            Err(_) => {
+                                return Err(StringFromPathError(entry.path()).into());
+                            }
                         }
-                        Err(e) => return Err(TagFromPathError(e, entry.path()).into()),
-                    },
-                    Err(_) => {
-                        return Err(StringFromPathError(entry.path()).into());
                     }
                 }
+                Ok(tags)
             }
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::NotFound => Ok(FxHashSet::default()),
+                _ => Err(e.into()),
+            },
         }
-        Ok(tags)
     }
 }
 
@@ -397,7 +350,7 @@ fn build_ops<'a>(
 
 #[cfg(test)]
 mod tests {
-    use std::fs::{remove_file, File};
+    use std::fs::{remove_dir_all, remove_file, File};
 
     use proptest::prelude::{prop::collection::vec, *};
     use test_strategy::proptest;
@@ -411,71 +364,6 @@ mod tests {
     };
 
     use super::*;
-
-    #[proptest(cases = 20)]
-    fn build_removes_tags_for_missing_files(paths: TaggedPaths, other_paths: TaggedPaths) {
-        let (actual, expected) = with_temp_dir(|dir| {
-            let filesystem = tagged_filesystem_with(dir, paths);
-
-            let expected = list_files(&filesystem.root);
-
-            for path in other_paths {
-                for tag in path.tags() {
-                    create_file_and_parent(filesystem.root.tag(path.name(), tag));
-                }
-            }
-            filesystem.build().unwrap();
-            let actual = list_files(&filesystem.root);
-
-            (actual, expected)
-        });
-
-        prop_assert_eq!(actual, expected);
-    }
-
-    #[proptest(cases = 20)]
-    fn build_adds_a_tags_directory_for_files_without(paths: TaggedPaths, names: Vec<Name>) {
-        let (actual, expected) = with_temp_dir(|dir| {
-            let filesystem = tagged_filesystem_with(dir, paths);
-            for name in &names {
-                filesystem.touch([], name.clone());
-            }
-
-            let expected = list_files(&filesystem.root);
-
-            for name in &names {
-                remove_dir_all(filesystem.root.file_tags(name)).unwrap();
-            }
-            filesystem.build().unwrap();
-            let actual = list_files(&filesystem.root);
-
-            (actual, expected)
-        });
-
-        prop_assert_eq!(actual, expected);
-    }
-
-    #[proptest(cases = 20)]
-    fn build_adds_a_program_tags_directory_for_files_without(paths: TaggedPaths, names: Vec<Name>) {
-        let (actual, expected) = with_temp_dir(|dir| {
-            let filesystem = tagged_filesystem_with(dir, paths);
-            for name in &names {
-                filesystem.touch([], name.clone());
-            }
-
-            let expected = list_files(&filesystem.root);
-
-            for name in &names {
-                remove_dir(filesystem.root.program_tags(name)).unwrap();
-            }
-            filesystem.build().unwrap();
-            let actual = list_files(&filesystem.root);
-
-            (actual, expected)
-        });
-
-        prop_assert_eq!(actual, expected);
-    }
 
     #[proptest(cases = 20)]
     fn build_removes_tagged_paths_for_missing_files(paths: TaggedPaths, other_paths: TaggedPaths) {
@@ -925,103 +813,6 @@ mod tests {
                 [format!("{a}-{b}/_{c}")].map(PathBuf::from),
             );
         });
-    }
-
-    #[proptest(cases = 20)]
-    fn build_some_only_removes_tags_for_considered_names(
-        paths: TaggedPaths,
-        considered_paths: TaggedPaths,
-        ignored_paths: TaggedPaths,
-    ) {
-        let (actual, expected) = with_temp_dir(|dir| {
-            let filesystem = tagged_filesystem_with(dir, paths);
-            for path in ignored_paths {
-                for tag in path.tags() {
-                    create_file_and_parent(filesystem.root.tag(path.name(), tag));
-                }
-            }
-
-            let expected = list_files(&filesystem.root);
-
-            for path in &considered_paths {
-                for tag in path.tags() {
-                    create_file_and_parent(filesystem.root.tag(path.name(), tag));
-                }
-            }
-            filesystem
-                .build_some(
-                    considered_paths
-                        .iter()
-                        .map(|path| path.name().to_owned())
-                        .collect(),
-                )
-                .unwrap();
-            let actual = list_files(&filesystem.root);
-
-            (actual, expected)
-        });
-
-        prop_assert_eq!(actual, expected);
-    }
-
-    #[proptest(cases = 20)]
-    fn build_some_only_adds_a_tags_directory_for_considered_names(
-        paths: TaggedPaths,
-        considered_names: Vec<Name>,
-        ignored_names: Vec<Name>,
-    ) {
-        let (actual, expected) = with_temp_dir(|dir| {
-            let filesystem = tagged_filesystem_with(dir, paths);
-            for name in &considered_names {
-                filesystem.touch([], name.clone());
-            }
-            for name in &ignored_names {
-                filesystem.touch([], name.clone());
-                remove_dir_all(filesystem.root.file_tags(name)).unwrap();
-            }
-
-            let expected = list_files(&filesystem.root);
-
-            for name in &considered_names {
-                remove_dir_all(filesystem.root.file_tags(name)).unwrap();
-            }
-            filesystem.build_some(considered_names).unwrap();
-            let actual = list_files(&filesystem.root);
-
-            (actual, expected)
-        });
-
-        prop_assert_eq!(actual, expected);
-    }
-
-    #[proptest(cases = 20)]
-    fn build_some_only_adds_a_program_tags_directory_for_considered_names(
-        paths: TaggedPaths,
-        considered_names: Vec<Name>,
-        ignored_names: Vec<Name>,
-    ) {
-        let (actual, expected) = with_temp_dir(|dir| {
-            let filesystem = tagged_filesystem_with(dir, paths);
-            for name in &considered_names {
-                filesystem.touch([], name.clone());
-            }
-            for name in &ignored_names {
-                filesystem.touch([], name.clone());
-                remove_dir(filesystem.root.program_tags(name)).unwrap();
-            }
-
-            let expected = list_files(&filesystem.root);
-
-            for name in &considered_names {
-                remove_dir(filesystem.root.program_tags(name)).unwrap();
-            }
-            filesystem.build_some(considered_names).unwrap();
-            let actual = list_files(&filesystem.root);
-
-            (actual, expected)
-        });
-
-        prop_assert_eq!(actual, expected);
     }
 
     #[proptest(cases = 20)]

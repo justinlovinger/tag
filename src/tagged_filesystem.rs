@@ -7,7 +7,7 @@ mod op;
 mod testing;
 
 use std::{
-    fs::{create_dir, create_dir_all, remove_dir, remove_dir_all, rename},
+    fs::{create_dir, create_dir_all, remove_dir, rename},
     path::{Path, PathBuf},
 };
 
