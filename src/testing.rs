@@ -25,7 +25,7 @@ mod fs {
         res
     }
 
-    pub fn make_file_and_parent<P>(path: P)
+    pub fn create_file_and_parent<P>(path: P)
     where
         P: AsRef<Path>,
     {

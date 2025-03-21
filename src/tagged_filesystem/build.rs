@@ -406,7 +406,7 @@ mod tests {
         tagged_filesystem::testing::{
             list_files, list_tagged_paths, tagged_filesystem, tagged_filesystem_with,
         },
-        testing::{make_file_and_parent, with_temp_dir, TaggedPaths},
+        testing::{create_file_and_parent, with_temp_dir, TaggedPaths},
         Tag,
     };
 
@@ -421,7 +421,7 @@ mod tests {
 
             for path in other_paths {
                 for tag in path.tags() {
-                    make_file_and_parent(filesystem.root.tag(path.name(), tag));
+                    create_file_and_parent(filesystem.root.tag(path.name(), tag));
                 }
             }
             filesystem.build().unwrap();
@@ -828,7 +828,7 @@ mod tests {
         let (actual, expected) = with_temp_dir(|dir| {
             let filesystem = tagged_filesystem_with(dir, paths);
             for path in hidden_paths {
-                make_file_and_parent(filesystem.root.join(format!(".{path}")));
+                create_file_and_parent(filesystem.root.join(format!(".{path}")));
             }
 
             let expected = list_files(&filesystem.root);
@@ -879,7 +879,7 @@ mod tests {
                 for tag in tags {
                     File::create(filesystem.root.tag(name, tag)).unwrap();
                 }
-                make_file_and_parent(filesystem.root.join(path));
+                create_file_and_parent(filesystem.root.join(path));
             }
 
             filesystem.build().unwrap();
@@ -937,7 +937,7 @@ mod tests {
             let filesystem = tagged_filesystem_with(dir, paths);
             for path in ignored_paths {
                 for tag in path.tags() {
-                    make_file_and_parent(filesystem.root.tag(path.name(), tag));
+                    create_file_and_parent(filesystem.root.tag(path.name(), tag));
                 }
             }
 
@@ -945,7 +945,7 @@ mod tests {
 
             for path in &considered_paths {
                 for tag in path.tags() {
-                    make_file_and_parent(filesystem.root.tag(path.name(), tag));
+                    create_file_and_parent(filesystem.root.tag(path.name(), tag));
                 }
             }
             filesystem

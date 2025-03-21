@@ -1,6 +1,6 @@
 use std::fs::{remove_file, File};
 
-use crate::testing::make_file_and_parent;
+use crate::testing::create_file_and_parent;
 
 use super::*;
 
@@ -30,7 +30,7 @@ where
 impl TaggedFilesystem {
     pub fn touch(&self, tags: impl IntoIterator<Item = Tag>, name: Name) {
         for tag in tags {
-            make_file_and_parent(self.root.tag(&name, tag))
+            create_file_and_parent(self.root.tag(&name, tag))
         }
         File::create(self.root.file(&name)).unwrap();
         self.build_some(vec![name]).unwrap();
@@ -38,7 +38,7 @@ impl TaggedFilesystem {
 
     pub fn mkdir(&self, tags: impl IntoIterator<Item = Tag>, name: Name) {
         for tag in tags {
-            make_file_and_parent(self.root.tag(&name, tag))
+            create_file_and_parent(self.root.tag(&name, tag))
         }
         create_dir(self.root.file(&name)).unwrap();
         self.build_some(vec![name]).unwrap();
