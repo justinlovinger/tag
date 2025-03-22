@@ -1,4 +1,7 @@
-use std::{fs::symlink_metadata, path::Path};
+use std::{
+    fs::{symlink_metadata, File},
+    path::Path,
+};
 
 pub fn symlink_file<P, Q>(original: P, link: Q) -> std::io::Result<()>
 where
@@ -62,5 +65,22 @@ where
         Ok(())
     } else {
         Err(RemoveSymlinkError::NotSymlinkError)
+    }
+}
+
+pub fn set_executable(file: &File) -> std::io::Result<()> {
+    #[cfg(target_family = "unix")]
+    {
+        use std::os::unix::prelude::PermissionsExt;
+
+        let mut permissions = file.metadata()?.permissions();
+        permissions.set_mode(permissions.mode() | 0o111);
+        file.set_permissions(permissions)?;
+        Ok(())
+    }
+
+    #[cfg(target_family = "windows")]
+    {
+        Ok(())
     }
 }

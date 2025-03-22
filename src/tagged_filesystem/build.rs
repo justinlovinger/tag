@@ -1,3 +1,5 @@
+use std::{process::Command, string::FromUtf8Error};
+
 use crate::{
     fs::{remove_symlink, RemoveSymlinkError},
     name::NameError,
@@ -26,9 +28,9 @@ pub enum NamesError {
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub enum TagsError {
-    InvalidString(#[from] StringFromPathError),
-    InvalidTag(#[from] TagFromPathError),
-    Filesystem(#[from] std::io::Error),
+    InvalidTag(#[from] TagForNameError),
+    InvalidUtf8(#[from] FromUtf8Error),
+    TagsScript(#[from] TagsScriptError),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -43,16 +45,20 @@ pub enum ApplyError {
 pub struct NameFromPathError(NameError, PathBuf);
 
 #[derive(Debug, thiserror::Error)]
-#[error("{0}. Tag is from `{1}`.")]
-pub struct TagFromPathError(TagError, PathBuf);
-
-#[derive(Debug, thiserror::Error)]
 #[error("`{0}` is not a valid Unicode string")]
 pub struct StringFromPathError(PathBuf);
 
 #[derive(Debug, thiserror::Error)]
 #[error("Error removing tagged path `{0}`: {1}")]
 pub struct RemovePathError(PathBuf, RemoveSymlinkError);
+
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to execute `.tag/tags.sh`: {0}")]
+pub struct TagsScriptError(std::io::Error);
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0}. Tag is for `{1}`.")]
+pub struct TagForNameError(TagError, PathBuf);
 
 struct BuildPaths {
     paths: Vec<TaggedPath>,
@@ -251,32 +257,23 @@ impl TaggedFilesystem {
     where
         N: AsRef<NameRef>,
     {
-        match read_paths(self.root.file_tags(name)) {
-            Ok(paths) => {
-                let mut tags = FxHashSet::default();
-                for namespace in paths {
-                    for entry in std::fs::read_dir(namespace)? {
-                        let entry = entry?;
-                        match entry.file_name().into_string() {
-                            Ok(s) => match Tag::new(s) {
-                                Ok(tag) => {
-                                    tags.insert(tag);
-                                }
-                                Err(e) => return Err(TagFromPathError(e, entry.path()).into()),
-                            },
-                            Err(_) => {
-                                return Err(StringFromPathError(entry.path()).into());
-                            }
-                        }
-                    }
-                }
-                Ok(tags)
-            }
-            Err(e) => match e.kind() {
-                std::io::ErrorKind::NotFound => Ok(FxHashSet::default()),
-                _ => Err(e.into()),
-            },
+        let mut tags = FxHashSet::default();
+        for line in String::from_utf8(
+            Command::new(self.root.tags())
+                .current_dir(&self.root)
+                .arg(name.as_ref().as_path())
+                .output()
+                .map_err(TagsScriptError)?
+                .stdout,
+        )?
+        .lines()
+        {
+            tags.insert(
+                Tag::new(line.into())
+                    .map_err(|e| TagForNameError(e, name.as_ref().as_path().to_path_buf()))?,
+            );
         }
+        Ok(tags)
     }
 }
 
@@ -350,7 +347,7 @@ fn build_ops<'a>(
 
 #[cfg(test)]
 mod tests {
-    use std::fs::{remove_dir_all, remove_file, File};
+    use std::fs::{remove_file, File};
 
     use proptest::prelude::{prop::collection::vec, *};
     use test_strategy::proptest;
@@ -370,6 +367,7 @@ mod tests {
         let (actual, expected) = with_temp_dir(|dir| {
             let filesystem = tagged_filesystem_with(dir, paths);
 
+            create_dir_all(filesystem.root.metadata().join("tags")).unwrap();
             let expected = list_files(&filesystem.root);
 
             for path in other_paths {
@@ -378,7 +376,7 @@ mod tests {
                     path.name().to_owned(),
                 );
                 remove_file(filesystem.root.file(path.name())).unwrap();
-                remove_dir_all(filesystem.root.file_tags(path.name())).unwrap();
+                filesystem.del_tags(path.name());
             }
             filesystem.build().unwrap();
             let actual = list_files(&filesystem.root);
@@ -453,7 +451,7 @@ mod tests {
                     path.tags().map(|tag| tag.to_owned()).chain([tag.clone()]),
                     path.name().to_owned(),
                 );
-                remove_file(filesystem.root.tag(path.name(), tag)).unwrap();
+                filesystem.del_tag(path.name(), tag);
             }
             filesystem.build().unwrap();
             let actual = list_files(&filesystem.root);
@@ -507,7 +505,7 @@ mod tests {
                     path.tags().map(|tag| tag.to_owned()),
                     path.name().to_owned(),
                 );
-                File::create(filesystem.root.tag(path.name(), tag)).unwrap();
+                filesystem.add_tag(path.name(), tag);
             }
             filesystem.build().unwrap();
             let actual = list_files(&filesystem.root);
@@ -596,6 +594,7 @@ mod tests {
                 [
                     ".tag/files/foo",
                     ".tag/tags/foo/tag/a",
+                    ".tag/tags.sh",
                     "a/not-tagged",
                     "a-_foo"
                 ]
@@ -651,7 +650,14 @@ mod tests {
             assert!(filesystem.build().is_err());
             assert_eq!(
                 list_files(filesystem.root),
-                [".tag/files/foo", ".tag/tags/foo/tag/a", "_bar", "a-_foo"].map(PathBuf::from),
+                [
+                    ".tag/files/foo",
+                    ".tag/tags/foo/tag/a",
+                    ".tag/tags.sh",
+                    "_bar",
+                    "a-_foo"
+                ]
+                .map(PathBuf::from),
             )
         });
 
@@ -661,7 +667,14 @@ mod tests {
             assert!(filesystem.build().is_err());
             assert_eq!(
                 list_files(filesystem.root),
-                [".tag/files/foo", ".tag/tags/foo/tag/a", "_bar", "a-_foo"].map(PathBuf::from),
+                [
+                    ".tag/files/foo",
+                    ".tag/tags/foo/tag/a",
+                    ".tag/tags.sh",
+                    "_bar",
+                    "a-_foo"
+                ]
+                .map(PathBuf::from),
             )
         });
 
@@ -680,7 +693,7 @@ mod tests {
         //     assert!(filesystem.build().is_err());
         //     assert_eq!(
         //         list_files(filesystem.root),
-        //         [".tag/files/foo", ".tag/tags/foo/tag/a", "_foo", "a-_foo"].map(PathBuf::from),
+        //         [".tag/files/foo", ".tag/tags/foo/tag/a", ".tag/tags.sh", "_foo", "a-_foo"].map(PathBuf::from),
         //     )
         // });
         //
@@ -690,7 +703,7 @@ mod tests {
         //     assert!(filesystem.build().is_err());
         //     assert_eq!(
         //         list_files(filesystem.root),
-        //         [".tag/files/foo", ".tag/tags/foo/tag/a", "_foo", "a-_foo"].map(PathBuf::from),
+        //         [".tag/files/foo", ".tag/tags/foo/tag/a", ".tag/tags.sh", "_foo", "a-_foo"].map(PathBuf::from),
         //     )
         // });
         // ```
@@ -763,10 +776,7 @@ mod tests {
                 .collect_vec();
             for ((name, tags), path) in names.iter().zip(&names_tags).zip(&paths) {
                 File::create(filesystem.root.file(name)).unwrap();
-                create_dir_all(filesystem.root.program_tags(name)).unwrap();
-                for tag in tags {
-                    File::create(filesystem.root.tag(name, tag)).unwrap();
-                }
+                filesystem.add_tags(name, tags);
                 create_file_and_parent(filesystem.root.join(path));
             }
 
@@ -829,7 +839,7 @@ mod tests {
                     path.name().to_owned(),
                 );
                 remove_file(filesystem.root.file(path.name())).unwrap();
-                remove_dir_all(filesystem.root.file_tags(path.name())).unwrap();
+                filesystem.del_tags(path.name());
             }
 
             let expected = list_files(&filesystem.root);
@@ -840,7 +850,7 @@ mod tests {
                     path.name().to_owned(),
                 );
                 remove_file(filesystem.root.file(path.name())).unwrap();
-                remove_dir_all(filesystem.root.file_tags(path.name())).unwrap();
+                filesystem.del_tags(path.name());
             }
             filesystem
                 .build_some(
@@ -868,10 +878,7 @@ mod tests {
             let filesystem = tagged_filesystem_with(dir, paths.iter().chain(&considered_paths));
             for path in ignored_paths {
                 File::create(filesystem.root.file(path.name())).unwrap();
-                create_dir_all(filesystem.root.program_tags(path.name())).unwrap();
-                for tag in path.tags() {
-                    File::create(filesystem.root.tag(path.name(), tag)).unwrap();
-                }
+                filesystem.add_tags(path.name(), path.tags());
             }
 
             let expected = list_files(&filesystem.root);
@@ -952,7 +959,7 @@ mod tests {
                 paths.iter().chain(&considered_paths).chain(&ignored_paths),
             );
             for (path, tag) in ignored_paths.into_iter().zip(ignored_extra_tags) {
-                remove_file(filesystem.root.tag(path.name(), tag)).unwrap();
+                filesystem.del_tag(path.name(), tag);
             }
 
             let expected = list_files(&filesystem.root);
@@ -963,7 +970,7 @@ mod tests {
                     path.tags().map(|tag| tag.to_owned()).chain([tag.clone()]),
                     path.name().to_owned(),
                 );
-                remove_file(filesystem.root.tag(path.name(), tag)).unwrap();
+                filesystem.del_tag(path.name(), tag);
             }
             filesystem
                 .build_some(
@@ -1038,7 +1045,7 @@ mod tests {
                 );
             }
             for (path, tag) in ignored_paths.iter().zip(&ignored_missing_tags) {
-                File::create(filesystem.root.tag(path.name(), tag)).unwrap();
+                filesystem.add_tag(path.name(), tag);
             }
 
             let expected = list_files(&filesystem.root);
@@ -1049,7 +1056,7 @@ mod tests {
                     path.tags().map(|tag| tag.to_owned()),
                     path.name().to_owned(),
                 );
-                File::create(filesystem.root.tag(path.name(), tag)).unwrap();
+                filesystem.add_tag(path.name(), tag);
             }
             filesystem
                 .build_some(

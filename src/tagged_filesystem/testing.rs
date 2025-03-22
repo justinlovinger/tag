@@ -1,6 +1,6 @@
 use std::fs::{remove_dir_all, remove_file, File};
 
-use crate::testing::create_file_and_parent;
+use crate::TagRef;
 
 use super::*;
 
@@ -16,7 +16,7 @@ where
     P: AsRef<Path>,
     Q: AsRef<Path>,
 {
-    let filesystem = TaggedFilesystem::init(dir).unwrap();
+    let filesystem = tagged_filesystem(dir);
     for path in paths.into_iter() {
         let tagged_path = TaggedPath::from_path(path.as_ref().to_owned()).unwrap();
         filesystem.touch(
@@ -29,24 +29,14 @@ where
 
 impl TaggedFilesystem {
     pub fn touch(&self, tags: impl IntoIterator<Item = Tag>, name: Name) {
-        create_dir_all(self.root.program_tags(&name)).unwrap();
-        for tag in tags {
-            create_file_and_parent(self.root.tag(&name, tag))
-        }
-
+        self.add_tags(&name, tags);
         File::create(self.root.file(&name)).unwrap();
-
         self.build_some(vec![name]).unwrap();
     }
 
     pub fn mkdir(&self, tags: impl IntoIterator<Item = Tag>, name: Name) {
-        create_dir_all(self.root.program_tags(&name)).unwrap();
-        for tag in tags {
-            create_file_and_parent(self.root.tag(&name, tag))
-        }
-
+        self.add_tags(&name, tags);
         create_dir(self.root.file(&name)).unwrap();
-
         self.build_some(vec![name]).unwrap();
     }
 
@@ -58,9 +48,62 @@ impl TaggedFilesystem {
             remove_file(file_path).unwrap();
         }
 
-        let _ = remove_dir_all(self.root.file_tags(&name));
+        let _ = remove_dir_all(self.root.join("tags").join(name.as_path()));
 
         self.build_some(vec![name]).unwrap();
+    }
+
+    pub fn add_tags<N, T>(&self, name: N, tags: impl IntoIterator<Item = T>)
+    where
+        N: AsRef<NameRef>,
+        T: AsRef<TagRef>,
+    {
+        create_dir_all(self.tags_path(&name)).unwrap();
+        for tag in tags {
+            self.add_tag(&name, tag);
+        }
+    }
+
+    pub fn add_tag<N, T>(&self, name: N, tag: T)
+    where
+        N: AsRef<NameRef>,
+        T: AsRef<TagRef>,
+    {
+        File::create(self.tag_path(name, tag)).unwrap();
+    }
+
+    pub fn del_tags<N>(&self, name: N)
+    where
+        N: AsRef<NameRef>,
+    {
+        remove_dir_all(self.tags_path(name).parent().unwrap()).unwrap();
+    }
+
+    pub fn del_tag<N, T>(&self, name: N, tag: T)
+    where
+        N: AsRef<NameRef>,
+        T: AsRef<TagRef>,
+    {
+        remove_file(self.tag_path(name, tag)).unwrap();
+    }
+
+    fn tag_path<N, T>(&self, name: N, tag: T) -> PathBuf
+    where
+        N: AsRef<NameRef>,
+        T: AsRef<TagRef>,
+    {
+        self.tags_path(name).join(tag.as_ref().as_path())
+    }
+
+    fn tags_path<N>(&self, name: N) -> PathBuf
+    where
+        N: AsRef<NameRef>,
+    {
+        self.root
+            .metadata()
+            .join("tags")
+            .join(name.as_ref().as_path())
+            .join("tag")
     }
 }
 

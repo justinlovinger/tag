@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::{NameRef, TagRef, TaggedPath, FILES_DIR, METADATA_DIR, PROGRAM_TAGS_DIR, TAGS_DIR};
+use crate::{NameRef, TaggedPath, FILES_DIR, METADATA_DIR, TAGS_SCRIPT};
 
 #[derive(Debug, Clone)]
 pub struct Root {
@@ -14,8 +14,8 @@ impl Root {
     pub fn new(path: PathBuf) -> std::io::Result<Option<Self>> {
         let metadata = path.join(METADATA_DIR);
         let files = metadata.join(FILES_DIR);
-        let tags = metadata.join(TAGS_DIR);
-        if metadata.is_dir() && files.is_dir() && tags.is_dir() {
+        let tags = metadata.join(TAGS_SCRIPT);
+        if metadata.is_dir() && files.is_dir() && tags.is_file() {
             Ok(Some(Self {
                 path,
                 metadata,
@@ -87,28 +87,6 @@ impl Root {
         N: AsRef<NameRef>,
     {
         self.files.join(name.as_ref().as_path())
-    }
-
-    pub fn file_tags<N>(&self, name: N) -> PathBuf
-    where
-        N: AsRef<NameRef>,
-    {
-        self.tags.join(name.as_ref().as_path())
-    }
-
-    pub fn program_tags<N>(&self, name: N) -> PathBuf
-    where
-        N: AsRef<NameRef>,
-    {
-        self.file_tags(name).join(PROGRAM_TAGS_DIR)
-    }
-
-    pub fn tag<N, T>(&self, name: N, tag: T) -> PathBuf
-    where
-        N: AsRef<NameRef>,
-        T: AsRef<TagRef>,
-    {
-        self.program_tags(name).join(tag.as_ref().as_path())
     }
 }
 

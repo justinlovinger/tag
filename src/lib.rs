@@ -19,8 +19,7 @@ pub use crate::{
 
 pub const METADATA_DIR: &str = ".tag";
 pub const FILES_DIR: &str = "files";
-pub const TAGS_DIR: &str = "tags";
-pub const PROGRAM_TAGS_DIR: &str = "tag";
+pub const TAGS_SCRIPT: &str = "tags.sh";
 
 pub const INLINE_SEPARATOR: char = '-';
 pub const DIR_SEPARATOR: char = '/';

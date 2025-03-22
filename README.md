@@ -19,10 +19,15 @@ Files are stored in `.tag/files/`,
 with the structure,
 `.tag/files/NAME`.
 
-Tags are stored in `.tag/tags/`
+Tags are determined by a `.tag/tags.sh` script
+that takes a `NAME`
+and returns a list of tags separated by newlines.
+This script can be changed or replaced.
+
+By default,
+the `tags.sh` script returns tags stored in `.tag/tags/`
 with the structure,
 `.tag/tags/NAME/NAMESPACE/TAG`.
-The Tag program uses the namespace: `tag`.
 An arbitrary number of namespaces can be defined.
 Tags from all namespaces are used for building tagged paths.
 

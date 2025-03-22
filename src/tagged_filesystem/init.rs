@@ -1,3 +1,7 @@
+use std::{fs::File, io::Write};
+
+use crate::fs::set_executable;
+
 use super::*;
 
 #[derive(Debug, thiserror::Error)]
@@ -41,8 +45,19 @@ impl TaggedFilesystem {
             Err(InitError::NotEmpty)
         } else {
             create_dir(dir.join(METADATA_DIR))?;
+
             create_dir(dir.join(METADATA_DIR).join(FILES_DIR))?;
-            create_dir(dir.join(METADATA_DIR).join(TAGS_DIR))?;
+
+            let mut tags_script = File::create(dir.join(METADATA_DIR).join(TAGS_SCRIPT))?;
+            tags_script.write_all(indoc::indoc! {br#"
+                #!/bin/sh
+
+                for tag in .tag/tags/"$1"/*/*; do
+                    [ -e "$tag" ] && echo "${tag##*/}"
+                done
+            "#})?;
+            set_executable(&tags_script)?;
+
             Ok(TaggedFilesystemBuilder::new(dir.to_owned())
                 .build()?
                 .unwrap())
@@ -67,7 +82,7 @@ mod tests {
             let filesystem = TaggedFilesystem::init(dir).unwrap();
             assert_eq!(
                 list_files(filesystem.root),
-                [".tag/files", ".tag/tags"].map(PathBuf::from)
+                [".tag/files", ".tag/tags.sh"].map(PathBuf::from)
             );
         })
     }
@@ -82,10 +97,11 @@ mod tests {
                 list_files(filesystem.root),
                 [
                     ".tag/files/bar/.tag/files",
-                    ".tag/files/bar/.tag/tags",
+                    ".tag/files/bar/.tag/tags.sh",
                     ".tag/tags/bar/tag/foo",
+                    ".tag/tags.sh",
                     "foo-_bar/.tag/files",
-                    "foo-_bar/.tag/tags",
+                    "foo-_bar/.tag/tags.sh",
                 ]
                 .map(PathBuf::from)
             );
@@ -102,10 +118,11 @@ mod tests {
                 list_files(filesystem.root),
                 [
                     ".tag/files/bar/.tag/files",
-                    ".tag/files/bar/.tag/tags",
+                    ".tag/files/bar/.tag/tags.sh",
                     ".tag/tags/bar/tag/foo",
+                    ".tag/tags.sh",
                     "foo-_bar/.tag/files",
-                    "foo-_bar/.tag/tags",
+                    "foo-_bar/.tag/tags.sh",
                 ]
                 .map(PathBuf::from)
             );
@@ -119,7 +136,7 @@ mod tests {
             assert!(TaggedFilesystem::init(dir).is_err());
             assert_eq!(
                 list_files(filesystem.root),
-                [".tag/files", ".tag/tags"].map(PathBuf::from)
+                [".tag/files", ".tag/tags.sh"].map(PathBuf::from)
             );
         })
     }
@@ -151,6 +168,7 @@ mod tests {
                     ".tag/files/baz",
                     ".tag/tags/bar/tag/foo",
                     ".tag/tags/baz/tag/foo",
+                    ".tag/tags.sh",
                     "foo/_bar",
                     "foo/_baz"
                 ]
