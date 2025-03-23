@@ -92,6 +92,7 @@ mod tests {
         with_temp_dir(|dir| {
             let filesystem = TaggedFilesystem::init(dir).unwrap();
             filesystem.mkdir([tag("foo")], name("bar"));
+            filesystem.build().unwrap();
             assert!(TaggedFilesystem::init(filesystem.root.file(name("bar"))).is_ok());
             assert_eq!(
                 list_files(filesystem.root),
@@ -113,6 +114,7 @@ mod tests {
         with_temp_dir(|dir| {
             let filesystem = TaggedFilesystem::init(dir).unwrap();
             filesystem.mkdir([tag("foo")], name("bar"));
+            filesystem.build().unwrap();
             assert!(TaggedFilesystem::init(filesystem.root.join("foo-_bar")).is_ok());
             assert_eq!(
                 list_files(filesystem.root),

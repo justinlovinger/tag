@@ -17,30 +17,41 @@ where
     Q: AsRef<Path>,
 {
     let filesystem = tagged_filesystem(dir);
+    create_dir_all(filesystem.root.metadata().join("tags")).unwrap();
     for path in paths.into_iter() {
         let tagged_path = TaggedPath::from_path(path.as_ref().to_owned()).unwrap();
         filesystem.touch(
             tagged_path.tags().map(|tag| tag.to_owned()),
-            tagged_path.name().to_owned(),
+            tagged_path.name(),
         );
+        filesystem.symlink_file(&tagged_path);
     }
     filesystem
 }
 
 impl TaggedFilesystem {
-    pub fn touch(&self, tags: impl IntoIterator<Item = Tag>, name: Name) {
+    pub fn touch<T, N>(&self, tags: impl IntoIterator<Item = T>, name: N)
+    where
+        T: AsRef<TagRef>,
+        N: AsRef<NameRef>,
+    {
         self.add_tags(&name, tags);
         File::create(self.root.file(&name)).unwrap();
-        self.build_some(vec![name]).unwrap();
     }
 
-    pub fn mkdir(&self, tags: impl IntoIterator<Item = Tag>, name: Name) {
+    pub fn mkdir<T, N>(&self, tags: impl IntoIterator<Item = T>, name: N)
+    where
+        T: AsRef<TagRef>,
+        N: AsRef<NameRef>,
+    {
         self.add_tags(&name, tags);
         create_dir(self.root.file(&name)).unwrap();
-        self.build_some(vec![name]).unwrap();
     }
 
-    pub fn rm(&self, name: Name) {
+    pub fn rm<N>(&self, name: N)
+    where
+        N: AsRef<NameRef>,
+    {
         let file_path = self.root.file(&name);
         if file_path.is_dir() {
             remove_dir_all(file_path).unwrap();
@@ -48,9 +59,7 @@ impl TaggedFilesystem {
             remove_file(file_path).unwrap();
         }
 
-        let _ = remove_dir_all(self.root.join("tags").join(name.as_path()));
-
-        self.build_some(vec![name]).unwrap();
+        let _ = remove_dir_all(self.root.join("tags").join(name.as_ref().as_path()));
     }
 
     pub fn add_tags<N, T>(&self, name: N, tags: impl IntoIterator<Item = T>)
@@ -104,6 +113,11 @@ impl TaggedFilesystem {
             .join("tags")
             .join(name.as_ref().as_path())
             .join("tag")
+    }
+
+    pub fn symlink_file(&self, path: &TaggedPath) {
+        create_dir_all(self.root.join(path).parent().unwrap()).unwrap();
+        symlink_file(self.root.file(path.name()), self.root.join(path)).unwrap();
     }
 }
 
