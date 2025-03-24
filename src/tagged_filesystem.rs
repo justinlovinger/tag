@@ -17,7 +17,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::{
     fs::{symlink_dir, symlink_file},
     organize::organize,
-    Name, NameRef, Root, Tag, TaggedPath, FILES_DIR, METADATA_DIR, TAGS_SCRIPT,
+    Name, Root, Tag, TaggedPath, FILES_DIR, METADATA_DIR, TAGS_SCRIPT,
 };
 
 pub(crate) use self::op::*;

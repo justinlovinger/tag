@@ -1,6 +1,6 @@
 use std::fs::{remove_dir_all, remove_file, File};
 
-use crate::TagRef;
+use crate::{NameRef, TagRef};
 
 use super::*;
 

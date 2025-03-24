@@ -1,12 +1,7 @@
-use std::{
-    io::{BufRead, BufReader, Write},
-    process::{Child, Command, Stdio},
-};
-
 use crate::{
     fs::{remove_symlink, RemoveSymlinkError},
     name::NameError,
-    tag::TagError,
+    tags_script::{TagsError, TagsScript},
 };
 
 use super::*;
@@ -15,6 +10,7 @@ use super::*;
 #[error("{0}")]
 pub enum BuildError {
     Names(#[from] NamesError),
+    TagsScript(#[from] crate::tags_script::NewError),
     Tags(#[from] TagsError),
     Apply(#[from] ApplyError),
     Filesystem(#[from] std::io::Error),
@@ -26,15 +22,6 @@ pub enum NamesError {
     InvalidString(#[from] StringFromPathError),
     InvalidName(#[from] NameFromPathError),
     Filesystem(#[from] std::io::Error),
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("{0}")]
-pub enum TagsError {
-    TagsScript(#[from] TagsScriptError),
-    TagsScriptWrite(#[from] TagsScriptWriteError),
-    TagsScriptRead(#[from] TagsScriptReadError),
-    InvalidTag(#[from] TagForNameError),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -55,22 +42,6 @@ pub struct StringFromPathError(PathBuf);
 #[derive(Debug, thiserror::Error)]
 #[error("Error removing tagged path `{0}`: {1}")]
 pub struct RemovePathError(PathBuf, RemoveSymlinkError);
-
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to execute `.tag/tags.sh`: {0}")]
-pub struct TagsScriptError(std::io::Error);
-
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to write to `.tag/tags.sh`: {0}")]
-pub struct TagsScriptWriteError(std::io::Error);
-
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to read from `.tag/tags.sh`: {0}")]
-pub struct TagsScriptReadError(std::io::Error);
-
-#[derive(Debug, thiserror::Error)]
-#[error("{0}. Tag is for `{1}`.")]
-pub struct TagForNameError(TagError, PathBuf);
 
 struct BuildPaths {
     paths: Vec<TaggedPath>,
@@ -105,7 +76,7 @@ impl TaggedFilesystem {
     }
 
     fn all_build_paths(&self, names: &FxHashSet<Name>) -> Result<BuildPaths, BuildError> {
-        let mut tags_script = self.tags_script()?;
+        let mut tags_script = TagsScript::new(&self.root)?;
 
         let mut path_names = FxHashSet::default();
         let (mut paths, excluded_paths) = self.tagged_paths().partition::<Vec<_>, _>(|path| {
@@ -114,7 +85,7 @@ impl TaggedFilesystem {
 
         let mut modified_paths = FxHashMap::default();
         for path in &mut paths {
-            let tags = self.tags(&mut tags_script, path.name())?;
+            let tags = tags_script.tags(path.name())?;
             let path_tags = path.tags().map(|tag| tag.to_owned()).collect();
             if tags != path_tags {
                 let original_path = path.as_path().to_owned();
@@ -126,13 +97,11 @@ impl TaggedFilesystem {
         let mut new_paths = FxHashSet::default();
         for name in names {
             if !path_names.contains(name) {
-                let path = TaggedPath::from_tags(&self.tags(&mut tags_script, name)?, name);
+                let path = TaggedPath::from_tags(&tags_script.tags(name)?, name);
                 new_paths.insert(path.as_path().to_owned());
                 paths.push(path);
             }
         }
-
-        let _ = tags_script.kill();
 
         Ok(BuildPaths {
             paths,
@@ -172,7 +141,7 @@ impl TaggedFilesystem {
         names: &FxHashSet<&'a Name>,
         considered_names: &[Name],
     ) -> Result<BuildPaths, BuildError> {
-        let mut tags_script = self.tags_script()?;
+        let mut tags_script = TagsScript::new(&self.root)?;
 
         let considered_names = considered_names.iter().collect::<FxHashSet<_>>();
 
@@ -187,7 +156,7 @@ impl TaggedFilesystem {
         let mut path_modifications = FxHashMap::default();
         let mut path_modifications_rev = FxHashMap::default();
         for path in &paths {
-            let tags = self.tags(&mut tags_script, path.name())?;
+            let tags = tags_script.tags(path.name())?;
             let path_tags = path.tags().map(|tag| tag.to_owned()).collect();
             if tags != path_tags {
                 let modified_path = TaggedPath::from_tags(&tags, path.name());
@@ -202,10 +171,7 @@ impl TaggedFilesystem {
         let mut new_paths = Vec::new();
         for name in names {
             if !path_names.contains(name.as_ref()) {
-                new_paths.push(TaggedPath::from_tags(
-                    &self.tags(&mut tags_script, name)?,
-                    name,
-                ));
+                new_paths.push(TaggedPath::from_tags(&tags_script.tags(name)?, name));
             }
         }
 
@@ -229,8 +195,6 @@ impl TaggedFilesystem {
         debug_assert!(path_modifications.is_empty());
 
         paths.extend(new_paths.iter().cloned());
-
-        let _ = tags_script.kill();
 
         Ok(BuildPaths {
             paths,
@@ -274,41 +238,6 @@ impl TaggedFilesystem {
         }
 
         Ok(())
-    }
-
-    fn tags_script(&self) -> Result<Child, TagsError> {
-        Ok(Command::new(self.root.tags())
-            .current_dir(&self.root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .map_err(TagsScriptError)?)
-    }
-
-    fn tags<N>(&self, script: &mut Child, name: N) -> Result<FxHashSet<Tag>, TagsError>
-    where
-        N: AsRef<NameRef>,
-    {
-        writeln!(script.stdin.as_mut().unwrap(), "{}", name.as_ref().as_str())
-            .map_err(TagsScriptWriteError)?;
-
-        let mut reader = BufReader::new(script.stdout.as_mut().unwrap());
-        let mut line = String::new();
-
-        let mut tags = FxHashSet::default();
-        loop {
-            reader.read_line(&mut line).map_err(TagsScriptReadError)?;
-            line.pop(); // `read_line` includes the `\n`.
-            if line.is_empty() {
-                break;
-            } else {
-                tags.insert(
-                    Tag::new(std::mem::take(&mut line))
-                        .map_err(|e| TagForNameError(e, name.as_ref().as_path().to_path_buf()))?,
-                );
-            }
-        }
-        Ok(tags)
     }
 }
 
