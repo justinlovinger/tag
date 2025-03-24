@@ -8,6 +8,19 @@ use rustc_hash::FxHashSet;
 
 use crate::{tag::TagError, NameRef, Root, Tag};
 
+pub fn default_script() -> &'static [u8] {
+    indoc::indoc! {br#"
+        #!/bin/sh
+
+        while read name; do
+            for tag in .tag/tags/"$name"/*/*; do
+                [ -e "$tag" ] && echo "${tag##*/}"
+            done
+            echo
+        done
+    "#}
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to execute `.tag/tags.sh`: {0}")]
 pub struct NewError(#[from] std::io::Error);

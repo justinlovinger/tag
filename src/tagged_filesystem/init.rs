@@ -1,6 +1,6 @@
 use std::{fs::File, io::Write};
 
-use crate::fs::set_executable;
+use crate::{fs::set_executable, tags_script::default_script};
 
 use super::*;
 
@@ -49,16 +49,7 @@ impl TaggedFilesystem {
             create_dir(dir.join(METADATA_DIR).join(FILES_DIR))?;
 
             let mut tags_script = File::create(dir.join(METADATA_DIR).join(TAGS_SCRIPT))?;
-            tags_script.write_all(indoc::indoc! {br#"
-                #!/bin/sh
-
-                while read name; do
-                    for tag in .tag/tags/"$name"/*/*; do
-                        [ -e "$tag" ] && echo "${tag##*/}"
-                    done
-                    echo
-                done
-            "#})?;
+            tags_script.write_all(default_script())?;
             set_executable(&tags_script)?;
 
             Ok(TaggedFilesystemBuilder::new(dir.to_owned())
