@@ -52,8 +52,11 @@ impl TaggedFilesystem {
             tags_script.write_all(indoc::indoc! {br#"
                 #!/bin/sh
 
-                for tag in .tag/tags/"$1"/*/*; do
-                    [ -e "$tag" ] && echo "${tag##*/}"
+                while read name; do
+                    for tag in .tag/tags/"$name"/*/*; do
+                        [ -e "$tag" ] && echo "${tag##*/}"
+                    done
+                    echo
                 done
             "#})?;
             set_executable(&tags_script)?;

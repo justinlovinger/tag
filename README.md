@@ -20,9 +20,10 @@ with the structure,
 `.tag/files/NAME`.
 
 Tags are determined by a `.tag/tags.sh` script
-that takes a `NAME`
-and returns a list of tags separated by newlines.
-This script can be changed or replaced.
+that takes `NAME`s
+and returns lists of tags separated by newlines.
+The script should print a blank line after listing tags for a `NAME`.
+The script can be changed or replaced.
 
 By default,
 the `tags.sh` script returns tags stored in `.tag/tags/`
