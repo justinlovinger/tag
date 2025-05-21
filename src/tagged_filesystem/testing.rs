@@ -1,4 +1,9 @@
-use std::fs::{remove_dir_all, remove_file, File};
+use std::{
+    fs::{remove_dir_all, remove_file, File},
+    process::{Command, Stdio},
+    thread,
+    time::Duration,
+};
 
 use crate::{NameRef, TagRef};
 
@@ -8,7 +13,29 @@ pub fn tagged_filesystem<P>(dir: P) -> TaggedFilesystem
 where
     P: AsRef<Path>,
 {
-    TaggedFilesystem::init(dir).unwrap()
+    let fs = TaggedFilesystem::init(dir).unwrap();
+
+    // The OS will sometimes fail to close the tags-script as quickly as it should,
+    // leading to an error when trying to execute it.
+    for _ in 0..100 {
+        // Note,
+        // this should only wait for `ExecutableFileBusy`,
+        // but that kind is unstable as of writing this.
+        match Command::new(fs.root.tags())
+            .current_dir(fs.root.as_path())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .spawn()
+        {
+            Ok(mut x) => {
+                let _ = x.kill();
+                break;
+            }
+            Err(_) => thread::sleep(Duration::from_millis(1)),
+        }
+    }
+
+    fs
 }
 
 pub fn tagged_filesystem_with<P, Q>(dir: P, paths: impl IntoIterator<Item = Q>) -> TaggedFilesystem
