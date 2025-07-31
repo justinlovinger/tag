@@ -17,7 +17,11 @@ pub struct Tag(String);
 pub struct TagRef(str);
 
 impl Tag {
-    pub fn new(s: String) -> Result<Tag, TagError> {
+    pub fn new<S>(s: S) -> Result<Tag, TagError>
+    where
+        S: Into<String>,
+    {
+        let s = s.into();
         if s.is_empty()
             || s.starts_with(TAG_END)
             || s.starts_with('.')
@@ -38,7 +42,7 @@ impl FromStr for Tag {
     type Err = TagError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::new(s.to_owned())
+        Self::new(s)
     }
 }
 
@@ -148,7 +152,7 @@ mod tests {
     }
 
     fn test_new(tag: &str) {
-        assert_eq!(Tag::new(tag.to_owned()).unwrap().to_string(), tag);
+        assert_eq!(Tag::new(tag).unwrap().to_string(), tag);
     }
 
     #[test]

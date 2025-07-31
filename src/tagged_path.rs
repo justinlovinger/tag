@@ -87,7 +87,12 @@ impl From<TagIndices> for SliceIndices {
 }
 
 impl TaggedPath {
-    pub fn new(path: String) -> Result<TaggedPath, TaggedPathError> {
+    pub fn new<S>(path: S) -> Result<TaggedPath, TaggedPathError>
+    where
+        S: Into<String>,
+    {
+        let path = path.into();
+
         let mut tags = Vec::new();
         let mut tag_start = 0;
         for (i, c) in path.char_indices() {
@@ -118,7 +123,11 @@ impl TaggedPath {
         Err(TaggedPathError(path))
     }
 
-    pub fn from_path(path: PathBuf) -> Result<TaggedPath, TaggedPathError> {
+    pub fn from_path<P>(path: P) -> Result<TaggedPath, TaggedPathError>
+    where
+        P: Into<PathBuf>,
+    {
+        let path = path.into();
         Self::new(
             path.into_os_string()
                 .into_string()
@@ -242,7 +251,7 @@ impl FromStr for TaggedPath {
     type Err = TaggedPathError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::new(s.to_owned())
+        Self::new(s)
     }
 }
 
@@ -278,9 +287,9 @@ mod tests {
 
     #[test]
     fn new_returns_ok_for_tagged_paths() {
-        assert!(TaggedPath::new("foo-bar-_baz".to_owned()).is_ok());
-        assert!(TaggedPath::new("foo/bar/_baz".to_owned()).is_ok());
-        assert!(TaggedPath::new("🙂/🙁-_baz".to_owned()).is_ok());
+        assert!(TaggedPath::new("foo-bar-_baz").is_ok());
+        assert!(TaggedPath::new("foo/bar/_baz").is_ok());
+        assert!(TaggedPath::new("🙂/🙁-_baz").is_ok());
     }
 
     #[proptest]
@@ -308,43 +317,40 @@ mod tests {
 
     #[test]
     fn new_returns_err_for_paths_with_empty_tags() {
-        assert!(TaggedPath::new("-bar-_baz".to_owned()).is_err());
-        assert!(TaggedPath::new("foo--_baz".to_owned()).is_err());
-        assert!(TaggedPath::new("/bar-_baz".to_owned()).is_err());
-        assert!(TaggedPath::new("foo/-_baz".to_owned()).is_err());
-        assert!(TaggedPath::new("foo-/_baz".to_owned()).is_err());
+        assert!(TaggedPath::new("-bar-_baz").is_err());
+        assert!(TaggedPath::new("foo--_baz").is_err());
+        assert!(TaggedPath::new("/bar-_baz").is_err());
+        assert!(TaggedPath::new("foo/-_baz").is_err());
+        assert!(TaggedPath::new("foo-/_baz").is_err());
     }
 
     #[test]
     fn new_returns_err_for_tags_starting_with_dot() {
-        assert!(TaggedPath::new(".-_baz".to_owned()).is_err());
-        assert!(TaggedPath::new(".bar-_baz".to_owned()).is_err());
-        assert!(TaggedPath::new("foo-.-_baz".to_owned()).is_err());
-        assert!(TaggedPath::new("foo-.bar-_baz".to_owned()).is_err());
+        assert!(TaggedPath::new(".-_baz").is_err());
+        assert!(TaggedPath::new(".bar-_baz").is_err());
+        assert!(TaggedPath::new("foo-.-_baz").is_err());
+        assert!(TaggedPath::new("foo-.bar-_baz").is_err());
     }
 
     #[test]
     fn new_returns_err_if_there_are_duplicate_tags() {
-        assert!(TaggedPath::new("foo-foo-_baz".to_owned()).is_err());
-        assert!(TaggedPath::new("foo/foo/_baz".to_owned()).is_err());
-        assert!(TaggedPath::new("foo-bar/foo/_baz".to_owned()).is_err());
-        assert!(TaggedPath::new("bar/foo-foo/_baz".to_owned()).is_err());
+        assert!(TaggedPath::new("foo-foo-_baz").is_err());
+        assert!(TaggedPath::new("foo/foo/_baz").is_err());
+        assert!(TaggedPath::new("foo-bar/foo/_baz").is_err());
+        assert!(TaggedPath::new("bar/foo-foo/_baz").is_err());
     }
 
     #[test]
     fn new_returns_err_if_name_contains_dir_separator() {
-        assert!(TaggedPath::new("foo-_baz/biz".to_owned()).is_err());
-        assert!(TaggedPath::new("foo/_/".to_owned()).is_err());
-        assert!(TaggedPath::new("foo/_/baz".to_owned()).is_err());
+        assert!(TaggedPath::new("foo-_baz/biz").is_err());
+        assert!(TaggedPath::new("foo/_/").is_err());
+        assert!(TaggedPath::new("foo/_/baz").is_err());
     }
 
     #[proptest]
     fn from_tags_matches_new(tags: HashSet<Tag>, name: Name) {
         let path = TaggedPath::from_tags(&tags.into_iter().collect(), name);
-        prop_assert_eq!(
-            TaggedPath::from_path(path.as_path().to_owned()).unwrap(),
-            path
-        );
+        prop_assert_eq!(TaggedPath::from_path(path.as_path()).unwrap(), path);
     }
 
     #[proptest]

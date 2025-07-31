@@ -35,7 +35,7 @@ mod tests {
                     .find(vec![tag("foo")], vec![])
                     .unwrap()
                     .collect_vec(),
-                [TaggedPath::new("foo-_1".into()).unwrap()]
+                [TaggedPath::new("foo-_1").unwrap()]
             );
         })
     }
@@ -49,7 +49,7 @@ mod tests {
                     .find(vec![tag("foo"), tag("bar")], vec![],)
                     .unwrap()
                     .collect_vec(),
-                [TaggedPath::new("foo/bar-_1".into()).unwrap()]
+                [TaggedPath::new("foo/bar-_1").unwrap()]
             );
         })
     }
@@ -63,7 +63,7 @@ mod tests {
                     .find(vec![tag("foo"),], vec![tag("bar")],)
                     .unwrap()
                     .collect_vec(),
-                [TaggedPath::new("foo/_2".into()).unwrap()]
+                [TaggedPath::new("foo/_2").unwrap()]
             );
         })
     }

@@ -34,8 +34,11 @@ pub struct TaggedFilesystem {
 
 impl TaggedFilesystemBuilder {
     #[allow(clippy::new_without_default)]
-    pub fn new(root: PathBuf) -> Self {
-        Self { root }
+    pub fn new<P>(root: P) -> Self
+    where
+        P: Into<PathBuf>,
+    {
+        Self { root: root.into() }
     }
 
     pub fn build(self) -> std::io::Result<Option<TaggedFilesystem>> {

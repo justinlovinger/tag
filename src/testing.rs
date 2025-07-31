@@ -181,11 +181,7 @@ mod tagged_path {
                 // `subsequence` puts tags in the order defined in `TAGS`,
                 // which could leave gaps in our testing.
                 subsequence(TAGS, params.min_tags..=params.max_tags)
-                    .prop_map(|tags| {
-                        tags.into_iter()
-                            .map(|x| Tag::new(x.to_owned()).unwrap())
-                            .collect_vec()
-                    })
+                    .prop_map(|tags| tags.into_iter().map(|x| Tag::new(x).unwrap()).collect_vec())
                     .prop_flat_map(|tags| {
                         (
                             vec(SEPARATOR_REGEX.as_str(), tags.len()).prop_map(|xs| {

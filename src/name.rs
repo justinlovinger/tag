@@ -17,7 +17,11 @@ pub struct Name(String);
 pub struct NameRef(str);
 
 impl Name {
-    pub fn new(s: String) -> Result<Name, NameError> {
+    pub fn new<S>(s: S) -> Result<Name, NameError>
+    where
+        S: Into<String>,
+    {
+        let s = s.into();
         if s.is_empty() || s.contains(DIR_SEPARATOR) {
             Err(NameError(s))
         } else {
@@ -38,7 +42,7 @@ impl FromStr for Name {
     type Err = NameError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::new(s.to_owned())
+        Self::new(s)
     }
 }
 
@@ -124,7 +128,7 @@ mod tests {
     }
 
     fn test_new(name: &str) {
-        assert_eq!(Name::new(name.to_owned()).unwrap().to_string(), name);
+        assert_eq!(Name::new(name).unwrap().to_string(), name);
     }
 
     #[test]

@@ -11,7 +11,12 @@ pub struct Root {
 }
 
 impl Root {
-    pub fn new(path: PathBuf) -> std::io::Result<Option<Self>> {
+    pub fn new<P>(path: P) -> std::io::Result<Option<Self>>
+    where
+        P: Into<PathBuf>,
+    {
+        let path = path.into();
+
         let metadata = path.join(METADATA_DIR);
         let files = metadata.join(FILES_DIR);
         let tags = metadata.join(TAGS_SCRIPT);
@@ -32,7 +37,7 @@ impl Root {
         P: AsRef<Path>,
     {
         for path in start.as_ref().ancestors() {
-            if let Some(root) = Self::new(path.to_owned())? {
+            if let Some(root) = Self::new(path)? {
                 for path in start
                     .as_ref()
                     .ancestors()

@@ -52,9 +52,7 @@ impl TaggedFilesystem {
             tags_script.write_all(default_script())?;
             set_executable(&tags_script)?;
 
-            Ok(TaggedFilesystemBuilder::new(dir.to_owned())
-                .build()?
-                .unwrap())
+            Ok(TaggedFilesystemBuilder::new(dir).build()?.unwrap())
         }
     }
 }
@@ -152,8 +150,8 @@ mod tests {
             let filesystem = tagged_filesystem_with(
                 dir,
                 [
-                    TaggedPath::new("foo/_bar".to_owned()).unwrap(),
-                    TaggedPath::new("foo/_baz".to_owned()).unwrap(),
+                    TaggedPath::new("foo/_bar").unwrap(),
+                    TaggedPath::new("foo/_baz").unwrap(),
                 ],
             );
             assert!(TaggedFilesystem::init(filesystem.root.join("foo")).is_err());

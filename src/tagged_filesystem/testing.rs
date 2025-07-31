@@ -46,7 +46,7 @@ where
     let filesystem = tagged_filesystem(dir);
     create_dir_all(filesystem.root.metadata().join("tags")).unwrap();
     for path in paths.into_iter() {
-        let tagged_path = TaggedPath::from_path(path.as_ref().to_owned()).unwrap();
+        let tagged_path = TaggedPath::from_path(path.as_ref()).unwrap();
         filesystem.touch(
             tagged_path.tags().map(|tag| tag.to_owned()),
             tagged_path.name(),
