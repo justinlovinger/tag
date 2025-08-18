@@ -133,6 +133,13 @@ impl ToOwned for TagRef {
     }
 }
 
+impl AsRef<TagRef> for internment::Intern<Tag> {
+    fn as_ref(&self) -> &TagRef {
+        let this: &Tag = self.as_ref();
+        this.as_ref()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;

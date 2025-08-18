@@ -1,142 +1,477 @@
+use std::path::PathBuf;
+
 use internment::Intern;
 use itertools::Itertools;
 
 use crate::{
-    tagged_filesystem::MoveOp, Tag, TaggedPath, DIR_SEPARATOR, INLINE_SEPARATOR, PATH_PART_MAX_LEN,
-    TAG_END,
+    tagged_filesystem::MoveOp, Tag, TagRef, TaggedPath, DIR_SEPARATOR, INLINE_SEPARATOR,
+    PATH_PART_MAX_LEN, TAG_END,
 };
 
 use self::partition::{Partition, TagsPaths};
 
-type Prefix = Vec<(Intern<Tag>, usize)>; // (tag, count)
-
 pub(crate) fn organize(paths: &[TaggedPath]) -> Vec<MoveOp> {
-    _organize(Partition::new(paths), Default::default())
-}
-
-fn _organize(paths: Partition, prefix: Prefix) -> Vec<MoveOp> {
-    stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
-        if let Some(tag) = tag_to_split(paths.tags_paths()) {
-            let (with_tag, without_tag) = paths.partition(tag);
-            debug_assert_ne!(with_tag.len(), 0);
-
-            let with_tag_prefix = prefix
-                .iter()
-                .cloned()
-                .chain([(tag, with_tag.len())])
-                .collect();
-            let (mut xs, ys) = rayon::join(
-                || _organize(with_tag, with_tag_prefix),
-                || _organize(without_tag, prefix),
-            );
-            xs.extend(ys);
-            xs
-        } else {
-            debug_assert_eq!(paths.tags_paths().len(), 0);
-            to_move_ops(paths, prefix)
-        }
-    })
-}
-
-fn tag_to_split(tags_paths: &TagsPaths) -> Option<Intern<Tag>> {
-    tags_paths
-        .iter()
-        .map(|(tag, tag_paths)| (tag, tag_paths.len()))
-        .max_by(|(tag, count), (other_tag, other_count)| {
-            count
-                .cmp(other_count)
-                .then_with(|| tag.len().cmp(&other_tag.len()))
-                .then_with(|| tag.cmp(other_tag).reverse())
-        })
-        .map(|(tag, _)| *tag)
-}
-
-fn to_move_ops(paths: Partition, prefix: Prefix) -> Vec<MoveOp> {
-    let prefix = {
-        let separators = prefix
-            .iter()
-            .map(|(tag, count)| (tag.len(), count))
-            .tuple_windows()
-            .map({
-                let mut len = 0;
-                move |((tag_len, count), (next_len, next_count))| {
-                    if count == next_count
-                        && len + tag_len + INLINE_SEPARATOR.len_utf8() + next_len
-                            <= PATH_PART_MAX_LEN
-                    {
-                        len += tag_len + INLINE_SEPARATOR.len_utf8();
-                        INLINE_SEPARATOR
-                    } else {
-                        len = 0;
-                        DIR_SEPARATOR
-                    }
-                }
+    combine(sort(paths))
+        .into_iter()
+        .filter_map(|(path, to)| {
+            (path.as_path() != to).then(|| MoveOp {
+                from: path.as_path().to_owned(),
+                to,
             })
-            .chain([DIR_SEPARATOR]);
-        format!(
-            "{}",
-            prefix
-                .iter()
-                .map(|(tag, _)| tag)
-                .zip(separators)
-                .format_with("", |(tag, sep), f| {
-                    f(&tag)?;
-                    f(&sep)?;
-                    Ok(())
-                }),
-        )
-    };
-
-    paths
-        .finalize()
-        .map(|(path, mut inline_tags)| {
-            let inline_tags = {
-                inline_tags.sort_unstable_by(|tag, other| {
-                    tag.len()
-                        .cmp(&other.len())
-                        .reverse()
-                        .then_with(|| tag.cmp(other))
-                });
-                let separators = inline_tags
-                    .iter()
-                    .map(|tag| tag.len())
-                    .chain([TAG_END.len_utf8() + path.name().len()])
-                    .tuple_windows()
-                    .map({
-                        let mut len = 0;
-                        move |(tag_len, next_len)| {
-                            if len + tag_len + INLINE_SEPARATOR.len_utf8() + next_len
-                                <= PATH_PART_MAX_LEN
-                            {
-                                len += tag_len + INLINE_SEPARATOR.len_utf8();
-                                INLINE_SEPARATOR
-                            } else {
-                                len = 0;
-                                DIR_SEPARATOR
-                            }
-                        }
-                    });
-                inline_tags
-                    .iter()
-                    .zip(separators)
-                    .format_with("", |(tag, sep), f| {
-                        f(&tag)?;
-                        f(&sep)?;
-                        Ok(())
-                    })
-            };
-
-            (
-                format!("{}{}{TAG_END}{}", &prefix, inline_tags, path.name()).into(),
-                path,
-            )
-        })
-        .filter(|(to, path)| path.as_path() != to)
-        .map(|(to, path)| MoveOp {
-            to,
-            from: path.as_path().into(),
         })
         .collect()
+}
+
+fn sort(paths: &[TaggedPath]) -> Vec<(&TaggedPath, Vec<Intern<Tag>>)> {
+    fn sort_inner(
+        paths: Partition,
+        prefix: Vec<Intern<Tag>>,
+    ) -> Vec<(&TaggedPath, Vec<Intern<Tag>>)> {
+        stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
+            if let Some(tag) = tag_to_split(paths.tags_paths()) {
+                let (with_tag, without_tag) = paths.partition(tag);
+                debug_assert_ne!(with_tag.len(), 0);
+
+                let with_tag_prefix = prefix.iter().cloned().chain([tag]).collect();
+                let (mut xs, ys) = rayon::join(
+                    || sort_inner(with_tag, with_tag_prefix),
+                    || sort_inner(without_tag, prefix),
+                );
+                xs.extend(ys);
+                xs
+            } else {
+                debug_assert_eq!(paths.tags_paths().len(), 0);
+                paths
+                    .finalize()
+                    .map(|(path, mut inline_tags)| {
+                        // Unstable sort is fine because every tag should be unique.
+                        inline_tags.sort_unstable_by(|tag, other| {
+                            tag.len()
+                                .cmp(&other.len())
+                                .reverse()
+                                .then_with(|| tag.cmp(other))
+                        });
+                        (path, prefix.iter().copied().chain(inline_tags).collect())
+                    })
+                    .collect()
+            }
+        })
+    }
+
+    fn tag_to_split(tags_paths: &TagsPaths) -> Option<Intern<Tag>> {
+        tags_paths
+            .iter()
+            .map(|(tag, tag_paths)| (tag, tag_paths.len()))
+            .max_by(|(tag, count), (other_tag, other_count)| {
+                count
+                    .cmp(other_count)
+                    .then_with(|| tag.len().cmp(&other_tag.len()))
+                    .then_with(|| tag.cmp(other_tag).reverse())
+            })
+            .map(|(tag, _)| *tag)
+    }
+
+    sort_inner(Partition::new(paths), Default::default())
+}
+
+fn combine<T>(mut tags: Vec<(&TaggedPath, Vec<T>)>) -> Vec<(&TaggedPath, PathBuf)>
+where
+    T: AsRef<TagRef>,
+{
+    fn combine_inner<'a, T>(
+        sorted: &[(&'a TaggedPath, Vec<T>)],
+        prefix: PathBuf,
+        tag_index: usize,
+    ) -> Vec<(&'a TaggedPath, PathBuf)>
+    where
+        T: AsRef<TagRef>,
+    {
+        let mut res = Vec::new();
+        let mut i = 0;
+        while let Some((path, tags)) = sorted.get(i) {
+            match tags.get(tag_index) {
+                Some(tag) => {
+                    let j = sorted
+                        .iter()
+                        .enumerate()
+                        .skip(i + 1)
+                        .find(|(_, (_, tags))| {
+                            tags.get(tag_index)
+                                .map_or(true, |other| other.as_ref() != tag.as_ref())
+                        })
+                        .map(|(j, _)| j)
+                        .unwrap_or(sorted.len());
+                    if j == i + 1 {
+                        let inline_tags = &tags[tag_index..];
+                        let separators = inline_tags
+                            .iter()
+                            .map(|tag| tag.as_ref().len())
+                            .chain([TAG_END.len_utf8() + path.name().len()])
+                            .tuple_windows()
+                            .map({
+                                let mut len = 0;
+                                move |(tag_len, next_len)| {
+                                    if len + tag_len + INLINE_SEPARATOR.len_utf8() + next_len
+                                        <= PATH_PART_MAX_LEN
+                                    {
+                                        len += tag_len + INLINE_SEPARATOR.len_utf8();
+                                        INLINE_SEPARATOR
+                                    } else {
+                                        len = 0;
+                                        DIR_SEPARATOR
+                                    }
+                                }
+                            });
+                        res.push((
+                            *path,
+                            prefix.join(format!(
+                                "{}{TAG_END}{}",
+                                inline_tags.iter().zip(separators).format_with(
+                                    "",
+                                    |(tag, sep), f| {
+                                        f(&tag.as_ref())?;
+                                        f(&sep)?;
+                                        Ok(())
+                                    }
+                                ),
+                                path.name(),
+                            )),
+                        ));
+                    } else {
+                        let (_, tags_of_last) = &sorted[j - 1];
+                        let next_tag_index = tags
+                            .iter()
+                            .zip(tags_of_last)
+                            .enumerate()
+                            .skip(tag_index + 1)
+                            .find(|(_, (tag, other))| tag.as_ref() != other.as_ref())
+                            .map(|(offset, _)| offset)
+                            .unwrap_or_else(|| tags.len().min(tags_of_last.len()));
+                        let inline_tags = &tags[tag_index..next_tag_index];
+                        let separators = inline_tags
+                            .iter()
+                            .map(|tag| tag.as_ref().len())
+                            .tuple_windows()
+                            .map({
+                                let mut len = 0;
+                                move |(tag_len, next_len)| {
+                                    if len + tag_len + INLINE_SEPARATOR.len_utf8() + next_len
+                                        <= PATH_PART_MAX_LEN
+                                    {
+                                        len += tag_len + INLINE_SEPARATOR.len_utf8();
+                                        INLINE_SEPARATOR.to_string()
+                                    } else {
+                                        len = 0;
+                                        DIR_SEPARATOR.to_string()
+                                    }
+                                }
+                            })
+                            .chain(["".to_string()]);
+                        res.extend(combine_inner(
+                            &sorted[i..j],
+                            prefix.join(
+                                inline_tags
+                                    .iter()
+                                    .zip(separators)
+                                    .format_with("", |(tag, sep), f| {
+                                        f(&tag.as_ref())?;
+                                        f(&sep)?;
+                                        Ok(())
+                                    })
+                                    // Creating a string here is wasteful,
+                                    // but `PathBuf` does not support joining a `Format`.
+                                    .to_string(),
+                            ),
+                            next_tag_index,
+                        ));
+                    }
+                    i = j;
+                }
+                None => {
+                    res.push((*path, prefix.join(format!("{TAG_END}{}", path.name()))));
+                    i += 1;
+                }
+            }
+        }
+        res
+    }
+
+    tags.sort_by(|(_, tags), (_, other)| {
+        tags.iter()
+            .map(|tag| tag.as_ref())
+            .cmp(other.iter().map(|tag| tag.as_ref()))
+    });
+    combine_inner(&tags, PathBuf::new(), 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+    use rustc_hash::FxHashSet;
+    use test_strategy::proptest;
+
+    use crate::{testing::TaggedPaths, Name};
+
+    use super::*;
+
+    #[test]
+    fn combine_separates_different_prefixes_by_inline() {
+        let paths = [
+            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), Name::new("foo.file").unwrap()),
+            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), Name::new("bar.file").unwrap()),
+        ];
+        assert_eq!(
+            combine(vec![
+                (&paths[0], vec![Tag::new("bar").unwrap()],),
+                (&paths[1], vec![Tag::new("baz").unwrap()],),
+            ]),
+            vec![
+                (&paths[0], PathBuf::from("bar-_foo.file")),
+                (&paths[1], PathBuf::from("baz-_bar.file")),
+            ]
+        );
+    }
+
+    #[test]
+    fn combine_separates_common_prefixes_by_dir() {
+        let paths = [
+            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), Name::new("foo.file").unwrap()),
+            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), Name::new("bar.file").unwrap()),
+        ];
+        assert_eq!(
+            combine(vec![
+                (&paths[0], vec![Tag::new("foo").unwrap()]),
+                (&paths[1], vec![Tag::new("foo").unwrap()]),
+            ]),
+            vec![
+                (&paths[0], PathBuf::from("foo/_foo.file")),
+                (&paths[1], PathBuf::from("foo/_bar.file")),
+            ]
+        );
+    }
+
+    #[test]
+    fn combine_separates_by_dir_and_inline() {
+        let paths = [
+            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), Name::new("foo.file").unwrap()),
+            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), Name::new("bar.file").unwrap()),
+        ];
+        assert_eq!(
+            combine(vec![
+                (
+                    &paths[0],
+                    vec![
+                        Tag::new("foo").unwrap(),
+                        Tag::new("bar").unwrap(),
+                        Tag::new("baz").unwrap(),
+                    ]
+                ),
+                (
+                    &paths[1],
+                    vec![
+                        Tag::new("foo").unwrap(),
+                        Tag::new("baz").unwrap(),
+                        Tag::new("bar").unwrap(),
+                    ]
+                )
+            ]),
+            vec![
+                (&paths[0], PathBuf::from("foo/bar-baz-_foo.file")),
+                (&paths[1], PathBuf::from("foo/baz-bar-_bar.file")),
+            ]
+        );
+    }
+
+    #[test]
+    fn combine_uses_inline_in_common_prefixes() {
+        let paths = [
+            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), Name::new("foo.file").unwrap()),
+            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), Name::new("bar.file").unwrap()),
+        ];
+        assert_eq!(
+            combine(vec![
+                (
+                    &paths[0],
+                    vec![
+                        Tag::new("foo").unwrap(),
+                        Tag::new("bar").unwrap(),
+                        Tag::new("baz").unwrap(),
+                    ]
+                ),
+                (
+                    &paths[1],
+                    vec![
+                        Tag::new("foo").unwrap(),
+                        Tag::new("bar").unwrap(),
+                        Tag::new("bin").unwrap(),
+                    ]
+                )
+            ]),
+            vec![
+                (&paths[0], PathBuf::from("foo-bar/baz-_foo.file")),
+                (&paths[1], PathBuf::from("foo-bar/bin-_bar.file")),
+            ]
+        );
+    }
+
+    #[test]
+    fn combine_does_not_use_inline_in_common_prefix_if_not_all_common() {
+        let paths = [
+            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), Name::new("foo.file").unwrap()),
+            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), Name::new("bar.file").unwrap()),
+            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), Name::new("baz.file").unwrap()),
+        ];
+        assert_eq!(
+            combine(vec![
+                (
+                    &paths[0],
+                    vec![
+                        Tag::new("foo").unwrap(),
+                        Tag::new("bar").unwrap(),
+                        Tag::new("baz").unwrap(),
+                    ]
+                ),
+                (
+                    &paths[1],
+                    vec![
+                        Tag::new("foo").unwrap(),
+                        Tag::new("bar").unwrap(),
+                        Tag::new("bin").unwrap(),
+                    ]
+                ),
+                (
+                    &paths[2],
+                    vec![Tag::new("foo").unwrap(), Tag::new("bin").unwrap()]
+                ),
+            ]),
+            vec![
+                (&paths[0], PathBuf::from("foo/bar/baz-_foo.file")),
+                (&paths[1], PathBuf::from("foo/bar/bin-_bar.file")),
+                (&paths[2], PathBuf::from("foo/bin-_baz.file")),
+            ]
+        );
+    }
+
+    #[test]
+    fn combine_uses_dir_in_long_common_prefixes() {
+        let a = "a".repeat(100);
+        let b = "b".repeat(100);
+        let c = "c".repeat(100);
+        let paths = [
+            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), Name::new("foo.file").unwrap()),
+            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), Name::new("bar.file").unwrap()),
+        ];
+        assert_eq!(
+            combine(vec![
+                (
+                    &paths[0],
+                    vec![
+                        Tag::new(&a).unwrap(),
+                        Tag::new(&b).unwrap(),
+                        Tag::new(&c).unwrap(),
+                        Tag::new("baz").unwrap(),
+                    ]
+                ),
+                (
+                    &paths[1],
+                    vec![
+                        Tag::new(&a).unwrap(),
+                        Tag::new(&b).unwrap(),
+                        Tag::new(&c).unwrap(),
+                        Tag::new("bin").unwrap(),
+                    ]
+                )
+            ]),
+            vec![
+                (
+                    &paths[0],
+                    PathBuf::from(format!("{a}-{b}/{c}/baz-_foo.file"))
+                ),
+                (
+                    &paths[1],
+                    PathBuf::from(format!("{a}-{b}/{c}/bin-_bar.file"))
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn combine_uses_dir_in_long_inline() {
+        let a = "a".repeat(100);
+        let b = "b".repeat(100);
+        let c = "c".repeat(100);
+        let paths = [
+            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), Name::new("foo.file").unwrap()),
+            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), Name::new("bar.file").unwrap()),
+        ];
+        assert_eq!(
+            combine(vec![
+                (&paths[0], vec![Tag::new("foo").unwrap()]),
+                (
+                    &paths[1],
+                    vec![
+                        Tag::new("foo").unwrap(),
+                        Tag::new(&a).unwrap(),
+                        Tag::new(&b).unwrap(),
+                        Tag::new(&c).unwrap(),
+                    ]
+                ),
+            ]),
+            vec![
+                (&paths[0], PathBuf::from("foo/_foo.file")),
+                (
+                    &paths[1],
+                    PathBuf::from(format!("foo/{a}-{b}/{c}-_bar.file"))
+                ),
+            ]
+        );
+    }
+
+    #[proptest]
+    fn combine_does_not_change_tags(paths: TaggedPaths) {
+        let paths = paths
+            .0
+            .iter()
+            .map(|path| (path.tags().map(|tag| tag.to_owned()).collect_vec(), path))
+            .map(|(tags, path)| (path, tags))
+            .collect::<Vec<_>>();
+        let (paths, new_paths): (Vec<_>, Vec<_>) = combine(paths).into_iter().unzip();
+        prop_assert_eq!(
+            new_paths
+                .into_iter()
+                .map(|path| TaggedPath::from_path(path)
+                    .unwrap()
+                    .tags()
+                    .map(|tag| tag.to_owned())
+                    .collect_vec())
+                .collect_vec(),
+            paths
+                .into_iter()
+                .map(|path| path.tags().map(|tag| tag.to_owned()).collect_vec())
+                .collect_vec()
+        );
+    }
+
+    #[proptest]
+    fn combine_does_not_change_names(paths: TaggedPaths) {
+        let paths = paths
+            .0
+            .iter()
+            .map(|path| (path.tags().map(|tag| tag.to_owned()).collect_vec(), path))
+            .map(|(tags, path)| (path, tags))
+            .collect::<Vec<_>>();
+        let (paths, new_paths): (Vec<_>, Vec<_>) = combine(paths).into_iter().unzip();
+        prop_assert_eq!(
+            new_paths
+                .into_iter()
+                .map(|path| TaggedPath::from_path(path).unwrap().name().to_owned())
+                .collect_vec(),
+            paths
+                .into_iter()
+                .map(|path| path.name().to_owned())
+                .collect_vec()
+        );
+    }
 }
 
 mod partition {
