@@ -57,7 +57,7 @@ struct BuildPaths {
 
 impl TaggedFilesystem {
     pub fn build(&self) -> Result<(), BuildError> {
-        self.clean_tagged_paths(self.all_build_paths(&self.all_names(self.root.files())?)?)
+        self.apply_build_paths(self.all_build_paths(&self.all_names(self.root.files())?)?)
     }
 
     fn all_names<P>(&self, dir: P) -> Result<FxHashSet<Name>, NamesError>
@@ -137,7 +137,7 @@ impl TaggedFilesystem {
     }
 
     pub fn build_some(&self, considered_names: Vec<Name>) -> Result<(), BuildError> {
-        self.clean_tagged_paths(self.some_build_paths(
+        self.apply_build_paths(self.some_build_paths(
             &self.some_names(self.root.files(), &considered_names)?,
             &considered_names,
         )?)
@@ -257,7 +257,7 @@ impl TaggedFilesystem {
         })
     }
 
-    fn clean_tagged_paths(&self, build_paths: BuildPaths) -> Result<(), BuildError> {
+    fn apply_build_paths(&self, build_paths: BuildPaths) -> Result<(), BuildError> {
         let move_ops = with_swap_ops(build_move_ops(
             build_paths.paths,
             build_paths.path_modifications_rev,
