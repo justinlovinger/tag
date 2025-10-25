@@ -8,10 +8,12 @@ use std::{
 use itertools::Itertools;
 use rustc_hash::FxHashSet;
 
-use crate::{NameRef, TagRef, DIR_SEPARATOR, INLINE_SEPARATOR, SEPARATORS, TAG_END};
+use crate::{
+    ExtRef, TagRef, DIR_SEPARATOR, EXT_SEPARATOR, INLINE_SEPARATOR, SEPARATORS, TAG_IGNORE,
+};
 
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
-#[error("`{0}` is not a tagged path: tagged paths must contain zero or more unique tags ended by `{INLINE_SEPARATOR}` or `{DIR_SEPARATOR}` with the tagging portion ended by `{TAG_END}`")]
+#[error("`{0}` is not a tagged path: tagged paths must contain zero or more unique tags ended by `{INLINE_SEPARATOR}`, `{DIR_SEPARATOR}`, or `{EXT_SEPARATOR}` with the tagging portion ended by `{EXT_SEPARATOR}`")]
 pub struct TaggedPathError(String);
 
 impl TaggedPathError {
@@ -27,14 +29,14 @@ impl TaggedPathError {
 #[derive(Clone)]
 pub struct TaggedPath {
     path: String,
-    /// Slice indices to get name from `path`,
-    /// start inclusive
-    /// and end exclusive.
-    name: SliceIndices,
     /// Slice indices to get tags from `path`,
     /// start inclusive
     /// and end exclusive.
     tags: Vec<TagIndices>,
+    /// Slice indices to get extension from `path`,
+    /// start inclusive
+    /// and end exclusive.
+    ext: SliceIndices,
 }
 
 // Including indices makes debugging more difficult.
@@ -50,7 +52,7 @@ impl fmt::Display for TaggedPath {
     }
 }
 
-// `name` and `tags` should always be the same
+// `tags` and `ext` should always be the same
 // for a given `path`.
 impl Eq for TaggedPath {}
 impl PartialEq for TaggedPath {
@@ -95,29 +97,35 @@ impl TaggedPath {
 
         let mut tags = Vec::new();
         let mut tag_start = 0;
+        let mut is_tag = true;
         for (i, c) in path.char_indices() {
             if i == tag_start {
-                if c == TAG_END {
+                if SEPARATORS.contains(&c) {
+                    // Tag is empty if `c` is separator.
+                    return Err(TaggedPathError(path));
+                }
+                is_tag = c != TAG_IGNORE;
+            } else if SEPARATORS.contains(&c) {
+                if is_tag {
+                    tags.push(TagIndices(tag_start, i));
+                }
+                if c == EXT_SEPARATOR {
                     let this = TaggedPath {
-                        // Exclude tag-end from name.
-                        name: SliceIndices(i + c.len_utf8(), path.len()),
-                        path,
                         tags,
+                        // Exclude separator from extension.
+                        ext: SliceIndices(i + c.len_utf8(), path.len()),
+                        path,
                     };
-                    return if this.tags_unique() && this.name_valid() {
+                    return if this.tags_unique() && this.ext_valid() {
                         Ok(this)
                     } else {
                         Err(TaggedPathError(this.path))
                     };
-                } else if SEPARATORS.contains(&c) || c == '.' {
-                    // Tag is empty if `c` is separator.
-                    return Err(TaggedPathError(path));
+                } else {
+                    // Skip this separator
+                    // for the start of the next tag.
+                    tag_start = i + c.len_utf8();
                 }
-            } else if SEPARATORS.contains(&c) {
-                tags.push(TagIndices(tag_start, i));
-                // Skip this separator
-                // for the start of the next tag.
-                tag_start = i + c.len_utf8();
             }
         }
         Err(TaggedPathError(path))
@@ -135,35 +143,37 @@ impl TaggedPath {
         )
     }
 
-    pub fn from_tags<T, N>(tags: &FxHashSet<T>, name: N) -> TaggedPath
+    pub fn from_tags<T, E>(tags: &FxHashSet<T>, ext: E) -> TaggedPath
     where
         T: AsRef<TagRef>,
-        N: AsRef<NameRef>,
+        E: AsRef<ExtRef>,
     {
         let mut tag_indices = Vec::new();
         let mut start = 0;
 
-        let path = format!(
-            "{}{TAG_END}{}",
-            tags.iter().format_with("", |tag, f| {
-                let end = start + tag.as_ref().len();
-                tag_indices.push(TagIndices(start, end));
-                start = end + 1;
+        let inline_separator = INLINE_SEPARATOR.to_string(); // As of writing, Rust cannot directly convert const `char` to `&str`.
+        let path = if tags.is_empty() {
+            start = start + TAG_IGNORE.len_utf8() + EXT_SEPARATOR.len_utf8();
+            format!("{TAG_IGNORE}{EXT_SEPARATOR}{}", ext.as_ref())
+        } else {
+            format!(
+                "{}{EXT_SEPARATOR}{}",
+                tags.iter().format_with(&inline_separator, |tag, f| {
+                    let end = start + tag.as_ref().len();
+                    tag_indices.push(TagIndices(start, end));
+                    start = end + INLINE_SEPARATOR.len_utf8();
+                    f(&tag.as_ref())
+                }),
+                ext.as_ref(),
+            )
+        };
 
-                f(&tag.as_ref())?;
-                f(&INLINE_SEPARATOR)?;
-                Ok(())
-            }),
-            name.as_ref(),
-        );
-
-        let start = start + 1; // Offset for tag-end character.
-        let name = SliceIndices(start, start + name.as_ref().len());
+        let ext = SliceIndices(start, start + ext.as_ref().len());
 
         Self {
             path,
-            name,
             tags: tag_indices,
+            ext,
         }
     }
 
@@ -184,12 +194,8 @@ impl TaggedPath {
         true
     }
 
-    fn name_valid(&self) -> bool {
-        !self.name().as_str().contains(DIR_SEPARATOR)
-    }
-
-    pub fn name(&self) -> &NameRef {
-        NameRef::new(self.slice(self.name))
+    fn ext_valid(&self) -> bool {
+        !self.ext().as_str().contains(DIR_SEPARATOR)
     }
 
     pub fn tags(&self) -> impl Iterator<Item = &TagRef> {
@@ -207,16 +213,25 @@ impl TaggedPath {
         self.tags.is_empty()
     }
 
-    pub fn tags_str(&self) -> &str {
-        match (self.tags.first(), self.tags.last()) {
-            // This is safe
-            // because slice indices are at character bounds.
-            (Some(x), Some(y)) => unsafe {
-                self.path
-                    .get_unchecked(x.0..(y.1 + self.separator_of(*y).len_utf8()))
-            },
-            _ => "",
-        }
+    // If this is made public,
+    // it should have unit tests.
+    pub(crate) fn ignored_tags(&self) -> impl Iterator<Item = &str> {
+        self.as_path()
+            .to_str()
+            .expect("paths should be valid strings")
+            .split_once(EXT_SEPARATOR)
+            .expect("paths should contain EXT_SEPARATOR")
+            .0
+            .split([INLINE_SEPARATOR, DIR_SEPARATOR])
+            .filter(|s| s.starts_with(TAG_IGNORE))
+            .map(|s| {
+                s.strip_prefix(TAG_IGNORE)
+                    .expect("ignored tags should start with TAG_IGNORE")
+            })
+    }
+
+    pub fn ext(&self) -> &ExtRef {
+        ExtRef::new(self.slice(self.ext))
     }
 
     pub fn as_path(&self) -> &Path {
@@ -225,15 +240,6 @@ impl TaggedPath {
 
     pub fn into_path(self) -> PathBuf {
         self.path.into()
-    }
-
-    /// Return the separator
-    /// following the tag
-    /// corresponding to the given indices.
-    fn separator_of(&self, x: TagIndices) -> char {
-        // This is safe
-        // because all tag-slice indices are in `path`.
-        char::from(*unsafe { self.path.as_bytes().get_unchecked(x.1) })
     }
 
     fn slice<T>(&self, x: T) -> &str
@@ -281,15 +287,15 @@ mod tests {
     use proptest::prelude::*;
     use test_strategy::proptest;
 
-    use crate::{testing::*, Name, Tag};
+    use crate::{testing::*, Ext, Tag};
 
     use super::*;
 
     #[test]
     fn new_returns_ok_for_tagged_paths() {
-        assert!(TaggedPath::new("foo-bar-_baz").is_ok());
-        assert!(TaggedPath::new("foo/bar/_baz").is_ok());
-        assert!(TaggedPath::new("🙂/🙁-_baz").is_ok());
+        assert!(TaggedPath::new("foo-bar.baz").is_ok());
+        assert!(TaggedPath::new("foo/bar.baz").is_ok());
+        assert!(TaggedPath::new("🙂/🙁.baz").is_ok());
     }
 
     #[proptest]
@@ -303,60 +309,48 @@ mod tests {
         }
     }
 
-    #[proptest]
-    fn new_returns_err_for_non_tagged_paths(s: String) {
-        prop_assume!(
-            !(s.starts_with(TAG_END)
-                || SEPARATORS
-                    .map(|c| format!("{}{}", c, TAG_END))
-                    .iter()
-                    .any(|ended_sep| s.contains(ended_sep)))
-        );
-        prop_assert!(TaggedPath::new(s).is_err());
+    #[test]
+    fn new_returns_err_for_paths_without_ext() {
+        assert!(TaggedPath::new("foo-bar").is_err());
+        assert!(TaggedPath::new("foo/bar").is_err());
     }
 
     #[test]
     fn new_returns_err_for_paths_with_empty_tags() {
-        assert!(TaggedPath::new("-bar-_baz").is_err());
-        assert!(TaggedPath::new("foo--_baz").is_err());
-        assert!(TaggedPath::new("/bar-_baz").is_err());
-        assert!(TaggedPath::new("foo/-_baz").is_err());
-        assert!(TaggedPath::new("foo-/_baz").is_err());
-    }
-
-    #[test]
-    fn new_returns_err_for_tags_starting_with_dot() {
-        assert!(TaggedPath::new(".-_baz").is_err());
-        assert!(TaggedPath::new(".bar-_baz").is_err());
-        assert!(TaggedPath::new("foo-.-_baz").is_err());
-        assert!(TaggedPath::new("foo-.bar-_baz").is_err());
+        assert!(TaggedPath::new("-bar.baz").is_err());
+        assert!(TaggedPath::new("foo-.baz").is_err());
+        assert!(TaggedPath::new("/bar.baz").is_err());
+        assert!(TaggedPath::new("foo/.baz").is_err());
+        assert!(TaggedPath::new("foo-.baz").is_err());
     }
 
     #[test]
     fn new_returns_err_if_there_are_duplicate_tags() {
-        assert!(TaggedPath::new("foo-foo-_baz").is_err());
-        assert!(TaggedPath::new("foo/foo/_baz").is_err());
-        assert!(TaggedPath::new("foo-bar/foo/_baz").is_err());
-        assert!(TaggedPath::new("bar/foo-foo/_baz").is_err());
+        assert!(TaggedPath::new("foo-foo.baz").is_err());
+        assert!(TaggedPath::new("foo/foo.baz").is_err());
+        assert!(TaggedPath::new("foo-bar/foo.baz").is_err());
+        assert!(TaggedPath::new("bar/foo-foo.baz").is_err());
     }
 
     #[test]
-    fn new_returns_err_if_name_contains_dir_separator() {
-        assert!(TaggedPath::new("foo-_baz/biz").is_err());
-        assert!(TaggedPath::new("foo/_/").is_err());
-        assert!(TaggedPath::new("foo/_/baz").is_err());
+    fn new_returns_err_if_ext_contains_dir_separator() {
+        assert!(TaggedPath::new("foo.baz/biz").is_err());
+        assert!(TaggedPath::new("foo./").is_err());
+        assert!(TaggedPath::new("foo./baz").is_err());
+    }
+
+    #[test]
+    fn from_tags_adds_ignored_tag_if_no_tags() {
+        assert_eq!(
+            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")).to_string(),
+            "_.x"
+        );
     }
 
     #[proptest]
-    fn from_tags_matches_new(tags: HashSet<Tag>, name: Name) {
-        let path = TaggedPath::from_tags(&tags.into_iter().collect(), name);
+    fn from_tags_matches_new(tags: HashSet<Tag>, ext: Ext) {
+        let path = TaggedPath::from_tags(&tags.into_iter().collect(), ext);
         prop_assert_eq!(TaggedPath::from_path(path.as_path()).unwrap(), path);
-    }
-
-    #[proptest]
-    fn name_returns_name(raw_path: RawTaggedPath) {
-        let path = TaggedPath::new(raw_path.to_string()).unwrap();
-        prop_assert_eq!(path.name(), raw_path.name.as_ref());
     }
 
     #[proptest]
@@ -366,22 +360,71 @@ mod tests {
     }
 
     #[proptest]
-    fn tags_str_returns_string_of_all_tags_with_separators(raw_path: RawTaggedPath) {
-        let tagged_path = TaggedPath::new(raw_path.to_string()).unwrap();
-        let path = raw_path.to_string();
-        prop_assert_eq!(
-            tagged_path.tags_str(),
-            path.strip_suffix(raw_path.name.as_str())
+    fn ext_returns_ext(raw_path: RawTaggedPath) {
+        let path = TaggedPath::new(raw_path.to_string()).unwrap();
+        prop_assert_eq!(path.ext(), raw_path.ext.as_ref());
+    }
+
+    #[test]
+    fn tags_starting_with_tag_ignore_are_ignored() {
+        assert_eq!(
+            TaggedPath::new("foo-_.x")
                 .unwrap()
-                .strip_suffix(TAG_END)
+                .tags()
+                .map(|tag| tag.to_owned())
+                .collect_vec(),
+            [tag("foo")]
+        );
+        assert_eq!(
+            TaggedPath::new("foo/_.x")
                 .unwrap()
+                .tags()
+                .map(|tag| tag.to_owned())
+                .collect_vec(),
+            [tag("foo")]
+        );
+        assert_eq!(
+            TaggedPath::new("foo-_-bar.x")
+                .unwrap()
+                .tags()
+                .map(|tag| tag.to_owned())
+                .collect_vec(),
+            [tag("foo"), tag("bar")]
+        );
+        assert_eq!(
+            TaggedPath::new("foo-_bar-biz.x")
+                .unwrap()
+                .tags()
+                .map(|tag| tag.to_owned())
+                .collect_vec(),
+            [tag("foo"), tag("biz")]
+        );
+        assert_eq!(
+            TaggedPath::new("foo-_-bar-_.x")
+                .unwrap()
+                .tags()
+                .map(|tag| tag.to_owned())
+                .collect_vec(),
+            [tag("foo"), tag("bar")]
+        );
+        assert_eq!(
+            TaggedPath::new("foo-_bar-biz-_baz.x")
+                .unwrap()
+                .tags()
+                .map(|tag| tag.to_owned())
+                .collect_vec(),
+            [tag("foo"), tag("biz")]
+        );
+        assert_eq!(
+            TaggedPath::new("foo/_bar-biz/_baz.x")
+                .unwrap()
+                .tags()
+                .map(|tag| tag.to_owned())
+                .collect_vec(),
+            [tag("foo"), tag("biz")]
         );
     }
 
-    static MAYBE_TAGGED_PATH: Lazy<String> = Lazy::new(|| {
-        format!(
-            r"\PC{{0,16}}[{}]{TAG_END}[a-z-_.]{{0,16}}",
-            *SEPARATORS_STRING
-        )
-    });
+    static MAYBE_TAGGED_PATH: Lazy<String> =
+        Lazy::new(|| format!(r"\PC{{0,16}}{EXT_SEPARATOR}[a-z-_.]{{0,16}}",));
 }

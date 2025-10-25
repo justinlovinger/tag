@@ -3,34 +3,30 @@ use std::{borrow::Borrow, ops::Deref, path::Path, str::FromStr};
 use derive_more::Display;
 use ref_cast::{ref_cast_custom, RefCastCustom};
 
-use crate::{ExtRef, DIR_SEPARATOR};
+use crate::DIR_SEPARATOR;
 
 #[derive(Debug, thiserror::Error)]
-#[error("Invalid name: `{0}`. Names cannot be empty or contain `{DIR_SEPARATOR}`.")]
-pub struct NameError(String);
+#[error("Invalid extension: `{0}`. Extensions cannot contain `{DIR_SEPARATOR}`.")]
+pub struct ExtError(String);
 
 #[derive(Clone, Debug, Display, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Name(String);
+pub struct Ext(String);
 
 #[derive(Debug, Display, PartialEq, Eq, PartialOrd, Ord, Hash, RefCastCustom)]
 #[repr(transparent)]
-pub struct NameRef(str);
+pub struct ExtRef(str);
 
-impl Name {
-    pub fn new<S>(s: S) -> Result<Name, NameError>
+impl Ext {
+    pub fn new<S>(s: S) -> Result<Ext, ExtError>
     where
         S: Into<String>,
     {
         let s = s.into();
-        if s.is_empty() || s.contains(DIR_SEPARATOR) {
-            Err(NameError(s))
+        if s.contains(DIR_SEPARATOR) {
+            Err(ExtError(s))
         } else {
-            Ok(Name(s))
+            Ok(Ext(s))
         }
-    }
-
-    pub fn ext(&self) -> &ExtRef {
-        ExtRef::new(self.0.split_once('.').map(|(_, ext)| ext).unwrap_or(""))
     }
 
     pub fn as_path(&self) -> &Path {
@@ -42,15 +38,15 @@ impl Name {
     }
 }
 
-impl FromStr for Name {
-    type Err = NameError;
+impl FromStr for Ext {
+    type Err = ExtError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::new(s)
     }
 }
 
-impl NameRef {
+impl ExtRef {
     #[ref_cast_custom]
     pub(crate) const fn new(s: &str) -> &Self;
 
@@ -71,49 +67,49 @@ impl NameRef {
     }
 }
 
-impl Deref for Name {
-    type Target = NameRef;
+impl Deref for Ext {
+    type Target = ExtRef;
 
     fn deref(&self) -> &Self::Target {
         self.borrow()
     }
 }
 
-impl AsRef<NameRef> for Name {
-    fn as_ref(&self) -> &NameRef {
+impl AsRef<ExtRef> for Ext {
+    fn as_ref(&self) -> &ExtRef {
         self.borrow()
     }
 }
 
-impl Borrow<NameRef> for Name {
-    fn borrow(&self) -> &NameRef {
-        NameRef::new(self.0.as_str())
+impl Borrow<ExtRef> for Ext {
+    fn borrow(&self) -> &ExtRef {
+        ExtRef::new(self.0.as_str())
     }
 }
 
-impl<'a> Borrow<NameRef> for &'a Name {
-    fn borrow(&self) -> &NameRef {
+impl<'a> Borrow<ExtRef> for &'a Ext {
+    fn borrow(&self) -> &ExtRef {
         (*self).borrow()
     }
 }
 
-impl<'a> From<&'a NameRef> for Name {
-    fn from(value: &'a NameRef) -> Self {
+impl<'a> From<&'a ExtRef> for Ext {
+    fn from(value: &'a ExtRef) -> Self {
         value.to_owned()
     }
 }
 
-impl AsRef<NameRef> for NameRef {
-    fn as_ref(&self) -> &NameRef {
+impl AsRef<ExtRef> for ExtRef {
+    fn as_ref(&self) -> &ExtRef {
         self
     }
 }
 
-impl ToOwned for NameRef {
-    type Owned = Name;
+impl ToOwned for ExtRef {
+    type Owned = Ext;
 
     fn to_owned(&self) -> Self::Owned {
-        Name(self.0.to_owned())
+        Ext(self.0.to_owned())
     }
 }
 
@@ -122,26 +118,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_returns_some_for_valid_names() {
+    fn new_returns_ok_for_valid_extensions() {
         test_new("foo");
         test_new("bar");
         test_new("🙂");
         test_new("foo.");
         test_new("has_underscore");
         test_new("has-dash");
+        test_new("");
     }
 
-    fn test_new(name: &str) {
-        assert_eq!(Name::new(name).unwrap().to_string(), name);
-    }
-
-    #[test]
-    fn new_returns_none_for_empty_strings() {
-        assert!(Name::new(String::new()).is_err());
+    fn test_new(ext: &str) {
+        assert_eq!(Ext::new(ext).unwrap().to_string(), ext);
     }
 
     #[test]
-    fn new_returns_none_for_strings_containing_a_directory_separator() {
-        assert!(Name::new(format!("foo{DIR_SEPARATOR}bar")).is_err());
+    fn new_returns_err_for_strings_containing_a_directory_separator() {
+        assert!(Ext::new(format!("foo{DIR_SEPARATOR}bar")).is_err());
     }
 }

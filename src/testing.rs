@@ -1,13 +1,10 @@
 use once_cell::sync::Lazy;
 
-use crate::{SEPARATORS, TAG_END};
+use crate::{DIR_SEPARATOR, INLINE_SEPARATOR};
 
-pub use self::{fs::*, name::*, tag::*, tagged_filesystem::*, tagged_path::*};
+pub use self::{ext::*, fs::*, name::*, tag::*, tagged_filesystem::*, tagged_path::*};
 
-pub static SEPARATORS_STRING: Lazy<String> = Lazy::new(|| SEPARATORS.iter().collect());
-static _SEPARATORS_AND_ENDS: Lazy<String> =
-    Lazy::new(|| format!("{}{TAG_END}", *SEPARATORS_STRING));
-static SEPARATOR_REGEX: Lazy<String> = Lazy::new(|| format!("[{}]", *SEPARATORS_STRING));
+static SEPARATOR_REGEX: Lazy<String> = Lazy::new(|| format!("[{INLINE_SEPARATOR}{DIR_SEPARATOR}]"));
 
 mod fs {
     use std::{
@@ -117,7 +114,7 @@ mod tagged_path {
         sample::subsequence,
     };
 
-    use crate::{Name, Tag, TaggedPath, TAG_END};
+    use crate::{Ext, Tag, TaggedPath, EXT_SEPARATOR, TAG_IGNORE};
 
     use super::{SEPARATOR_REGEX, TAGS};
 
@@ -148,19 +145,29 @@ mod tagged_path {
 
     #[derive(Clone, Debug)]
     pub struct RawTaggedPath {
-        pub name: Name,
         pub tags: Vec<Tag>,
         pub seps: Vec<char>,
+        pub ext: Ext,
     }
 
     impl fmt::Display for RawTaggedPath {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            for (tag, sep) in self.tags.iter().zip(self.seps.iter()) {
-                tag.fmt(f)?;
-                sep.fmt(f)?;
+            if self.tags.is_empty() {
+                TAG_IGNORE.fmt(f)?;
+            } else {
+                for (tag, sep) in self
+                    .tags
+                    .iter()
+                    .zip(self.seps.iter().map(Some).chain([None]))
+                {
+                    tag.fmt(f)?;
+                    if let Some(sep) = sep {
+                        sep.fmt(f)?;
+                    }
+                }
             }
-            TAG_END.fmt(f)?;
-            self.name.fmt(f)
+            EXT_SEPARATOR.fmt(f)?;
+            self.ext.fmt(f)
         }
     }
 
@@ -176,7 +183,6 @@ mod tagged_path {
 
         fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
             (
-                Name::arbitrary(),
                 // Note,
                 // `subsequence` puts tags in the order defined in `TAGS`,
                 // which could leave gaps in our testing.
@@ -184,16 +190,19 @@ mod tagged_path {
                     .prop_map(|tags| tags.into_iter().map(|x| Tag::new(x).unwrap()).collect_vec())
                     .prop_flat_map(|tags| {
                         (
-                            vec(SEPARATOR_REGEX.as_str(), tags.len()).prop_map(|xs| {
-                                xs.into_iter()
-                                    .map(|s| s.chars().next().expect("at least one character"))
-                                    .collect()
-                            }),
+                            vec(SEPARATOR_REGEX.as_str(), tags.len().saturating_sub(1)).prop_map(
+                                |xs| {
+                                    xs.into_iter()
+                                        .map(|s| s.chars().next().expect("at least one character"))
+                                        .collect()
+                                },
+                            ),
                             Just(tags),
                         )
                     }),
+                Ext::arbitrary(),
             )
-                .prop_map(|(name, (seps, tags))| Self { name, tags, seps })
+                .prop_map(|((seps, tags), ext)| Self { tags, seps, ext })
                 .boxed()
         }
     }
@@ -204,8 +213,11 @@ mod tag {
 
     use crate::Tag;
 
-    pub fn tag(s: &str) -> Tag {
-        Tag::new(s.to_owned()).unwrap()
+    pub fn tag<S>(s: S) -> Tag
+    where
+        S: Into<String>,
+    {
+        Tag::new(s).unwrap()
     }
 
     pub const TAGS: &[&str] = &[
@@ -225,28 +237,66 @@ mod tag {
     }
 }
 
-mod name {
-    use proptest::{prelude::*, strategy::LazyJust};
-    use uuid::Uuid;
+mod ext {
+    use crate::Ext;
+    use proptest::{prelude::*, sample::select};
 
-    use crate::Name;
+    const EXTS: &[&str] = &[
+        "cpp", "dir", "html", "jpg", "md", "mp3", "mp4", "nix", "pdf", "rs", "txt", "AppImage",
+    ];
 
-    pub fn name(s: &str) -> Name {
-        Name::new(s.to_owned()).unwrap()
+    pub fn ext(s: &str) -> Ext {
+        Ext::new(s).unwrap()
     }
 
-    impl Arbitrary for Name {
+    impl Arbitrary for Ext {
         type Parameters = ();
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-            // We specifically want unique names.
-            // That means not using Proptest to generate them.
-            // Proptest could shrink names into being non-unique.
-            // Note,
-            // `Just` may clone the given value,
-            // so we need to use `LazyJust` to ensure a new value is generated every time.
-            LazyJust::new(|| Name::new(Uuid::new_v4().to_string()).unwrap()).boxed()
+            select(EXTS)
+                .prop_map(|x| Self::new(x.to_owned()).unwrap())
+                .boxed()
+        }
+    }
+}
+
+mod name {
+    use proptest::prelude::*;
+    use uuid::Uuid;
+
+    use crate::{Ext, Name, EXT_SEPARATOR};
+
+    pub fn name<S>(s: S) -> Name
+    where
+        S: Into<String>,
+    {
+        Name::new(s).unwrap()
+    }
+
+    impl Arbitrary for Name {
+        type Parameters = Option<Ext>;
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+            let ext = if let Some(ext) = params {
+                Just(ext).boxed()
+            } else {
+                Ext::arbitrary().boxed()
+            };
+            ext.prop_map(move |ext| {
+                // We specifically want unique names.
+                // That means not using Proptest to generate them.
+                // Proptest could shrink names into being non-unique.
+                // Note,
+                // `Just` may clone the given value,
+                // so we need to use `LazyJust` to ensure a new value is generated every time.
+                let mut name = Uuid::new_v4().simple().to_string();
+                name.push(EXT_SEPARATOR);
+                name.push_str(ext.as_str());
+                Name::new(name).unwrap()
+            })
+            .boxed()
         }
     }
 }

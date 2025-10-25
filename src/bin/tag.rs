@@ -3,12 +3,10 @@ use std::{
     fmt,
     io::{self, Write},
     path::PathBuf,
-    str::FromStr,
 };
 
 use clap::{Parser, Subcommand};
-use itertools::Itertools;
-use tag::{Name, Tag, TaggedFilesystem, TaggedFilesystemBuilder, TaggedPath};
+use tag::{Name, Tag, TaggedFilesystem, TaggedFilesystemBuilder};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -66,43 +64,7 @@ enum Commands {
         /// Ignore files including *any* of these tags
         #[clap(long, short, value_name = "TAG")]
         exclude: Vec<Tag>,
-
-        /// Sort output by name
-        #[clap(long)]
-        sort_by_name: bool,
     },
-}
-
-#[derive(Clone, Debug)]
-enum PathOrName {
-    Path(TaggedPath),
-    Name(Name),
-}
-
-impl FromStr for PathOrName {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.to_owned();
-        match TaggedPath::new(s) {
-            Ok(path) => Ok(Self::Path(path)),
-            Err(e) => {
-                let path_msg = e.to_string();
-                Name::new(e.into_string())
-                    .map_err(|e| anyhow::Error::msg(format!("{path_msg}. {e}.")))
-                    .map(Self::Name)
-            }
-        }
-    }
-}
-
-impl From<PathOrName> for Name {
-    fn from(value: PathOrName) -> Self {
-        match value {
-            PathOrName::Path(path) => path.name().to_owned(),
-            PathOrName::Name(name) => name,
-        }
-    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -124,18 +86,7 @@ fn main() -> anyhow::Result<()> {
                 Some(names) => filesystem.build_some(names)?,
                 None => filesystem.build()?,
             },
-            Some(Commands::Find {
-                include,
-                exclude,
-                sort_by_name,
-            }) => {
-                let files = filesystem.find(include, exclude)?;
-                if sort_by_name {
-                    print(files.sorted_unstable_by(|file, other| file.name().cmp(other.name())))?
-                } else {
-                    print(files)?
-                }
-            }
+            Some(Commands::Find { include, exclude }) => print(filesystem.find(include, exclude)?)?,
             None => {}
         }
     }

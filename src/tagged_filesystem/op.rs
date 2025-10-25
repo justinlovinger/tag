@@ -21,6 +21,10 @@ impl From<MoveOp> for Op {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("{0}, on {1:?}")]
+pub struct OpError(std::io::Error, Op);
+
 pub(crate) fn from_move_ops(ops: Vec<MoveOp>) -> impl Iterator<Item = Op> {
     // We know a directory exists
     // if a file is moving from it.
@@ -73,7 +77,7 @@ pub(crate) fn from_move_ops(ops: Vec<MoveOp>) -> impl Iterator<Item = Op> {
 }
 
 impl TaggedFilesystem {
-    pub(crate) fn apply_all(&self, ops: impl IntoIterator<Item = Op>) -> std::io::Result<()> {
+    pub(crate) fn apply_all(&self, ops: impl IntoIterator<Item = Op>) -> Result<(), OpError> {
         let ops = self.canonicalize_all(ops).collect_vec();
 
         if let Err(e) = self.apply_all_(&ops) {
@@ -112,20 +116,20 @@ impl TaggedFilesystem {
         }
     }
 
-    fn apply_all_<'a>(&self, ops: impl IntoIterator<Item = &'a Op>) -> std::io::Result<()> {
+    fn apply_all_<'a>(&self, ops: impl IntoIterator<Item = &'a Op>) -> Result<(), OpError> {
         for op in ops.into_iter() {
             self.apply_(op)?
         }
         Ok(())
     }
 
-    fn apply_(&self, op: &Op) -> std::io::Result<()> {
-        match op {
+    fn apply_(&self, op: &Op) -> Result<(), OpError> {
+        (match op {
             Op::EnsureDirectory(path) => create_dir_all(path),
             Op::Move(MoveOp { from, to }) => {
                 // This utility should only organize data,
                 // never delete it.
-                if to.try_exists()? {
+                if to.try_exists().map_err(|e| OpError(e, op.clone()))? {
                     if to == from {
                         Ok(())
                     } else {
@@ -153,12 +157,17 @@ impl TaggedFilesystem {
                 //     }
                 // }
                 // ```
-                if std::fs::read_dir(path)?.next().is_none() {
+                if std::fs::read_dir(path)
+                    .map_err(|e| OpError(e, op.clone()))?
+                    .next()
+                    .is_none()
+                {
                     remove_dir(path)
                 } else {
                     Ok(())
                 }
             }
-        }
+        })
+        .map_err(|e| OpError(e, op.clone()))
     }
 }

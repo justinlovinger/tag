@@ -35,28 +35,30 @@ Tags from all namespaces are used for building tagged paths.
 Links to files are stored outside `.tag/`.
 Each link is a tagged path.
 A tagged path consists of zero or more tags
-and a name.
-Each tag ends with `-` or `/`.
-Tags are separated from name by `_` directly following the end of a tag.
+and an extension.
+Each tag ends with `-`, `/`, or `.`.
+Tags starting with `_` are ignored.
+Characters after the first `.` are the extension.
 For example,
-`foo-bar/_baz`
-is a path named `baz`
-with tags `foo` and `bar`.
-`foo/bar-_baz`,
-`foo-bar-_baz`,
-and `foo/bar/_baz`
+`foo-bar.baz`
+is a path with tags `foo` and `bar`
+and extension `baz`.
+`foo/bar.baz`
+and `foo/bar/_.baz`
 are equivalent.
-Tags cannot start with `.`.
+Extensions can contain `.`.
+For example,
+`foo.tar.gz` has the extension `tar.gz`.
 Tagged paths cannot have the same tag more than once.
 Tag order is arbitrary.
 
 ## Terminology
 
 A "tagged path" is a link to a file.
-It stores tags and a name in its path.
+It stores tags and an extension in its path.
 It may have zero tags.
 
-An "inline-tag" is a tag in a tagged path ended by `-`.
+An "inline-tag" is a tag in a tagged path ended by `-` or `.`.
 
 A "directory-tag" is a tag in a tagged path ended by `/`.
 

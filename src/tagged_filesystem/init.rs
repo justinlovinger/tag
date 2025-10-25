@@ -83,18 +83,18 @@ mod tests {
     fn init_initializes_a_nested_tagged_filesystem_from_files_dir() {
         with_temp_dir(|dir| {
             let filesystem = TaggedFilesystem::init(dir).unwrap();
-            filesystem.mkdir([tag("foo")], name("bar"));
+            filesystem.mkdir([tag("foo")], name("foo.dir"));
             filesystem.build().unwrap();
-            assert!(TaggedFilesystem::init(filesystem.root.file(name("bar"))).is_ok());
+            assert!(TaggedFilesystem::init(filesystem.root.file(name("foo.dir"))).is_ok());
             assert_eq!(
                 list_files(filesystem.root),
                 [
-                    ".tag/files/bar/.tag/files",
-                    ".tag/files/bar/.tag/tags.sh",
-                    ".tag/tags/bar/tag/foo",
+                    ".tag/files/foo.dir/.tag/files",
+                    ".tag/files/foo.dir/.tag/tags.sh",
+                    ".tag/tags/foo.dir/tag/foo",
                     ".tag/tags.sh",
-                    "foo-_bar/.tag/files",
-                    "foo-_bar/.tag/tags.sh",
+                    "foo.dir/.tag/files",
+                    "foo.dir/.tag/tags.sh",
                 ]
                 .map(PathBuf::from)
             );
@@ -105,18 +105,18 @@ mod tests {
     fn init_initializes_a_nested_tagged_filesystem_from_tagged_path() {
         with_temp_dir(|dir| {
             let filesystem = TaggedFilesystem::init(dir).unwrap();
-            filesystem.mkdir([tag("foo")], name("bar"));
+            filesystem.mkdir([tag("foo")], name("foo.dir"));
             filesystem.build().unwrap();
-            assert!(TaggedFilesystem::init(filesystem.root.join("foo-_bar")).is_ok());
+            assert!(TaggedFilesystem::init(filesystem.root.join("foo.dir")).is_ok());
             assert_eq!(
                 list_files(filesystem.root),
                 [
-                    ".tag/files/bar/.tag/files",
-                    ".tag/files/bar/.tag/tags.sh",
-                    ".tag/tags/bar/tag/foo",
+                    ".tag/files/foo.dir/.tag/files",
+                    ".tag/files/foo.dir/.tag/tags.sh",
+                    ".tag/tags/foo.dir/tag/foo",
                     ".tag/tags.sh",
-                    "foo-_bar/.tag/files",
-                    "foo-_bar/.tag/tags.sh",
+                    "foo.dir/.tag/files",
+                    "foo.dir/.tag/tags.sh",
                 ]
                 .map(PathBuf::from)
             );
@@ -149,22 +149,19 @@ mod tests {
         with_temp_dir(|dir| {
             let filesystem = tagged_filesystem_with(
                 dir,
-                [
-                    TaggedPath::new("foo/_bar").unwrap(),
-                    TaggedPath::new("foo/_baz").unwrap(),
-                ],
+                [("foo/_1.x", name("bar.x")), ("foo/_2.x", name("baz.x"))],
             );
             assert!(TaggedFilesystem::init(filesystem.root.join("foo")).is_err());
             assert_eq!(
                 list_files(filesystem.root),
                 [
-                    ".tag/files/bar",
-                    ".tag/files/baz",
-                    ".tag/tags/bar/tag/foo",
-                    ".tag/tags/baz/tag/foo",
+                    ".tag/files/bar.x",
+                    ".tag/files/baz.x",
+                    ".tag/tags/bar.x/tag/foo",
+                    ".tag/tags/baz.x/tag/foo",
                     ".tag/tags.sh",
-                    "foo/_bar",
-                    "foo/_baz"
+                    "foo/_1.x",
+                    "foo/_2.x"
                 ]
                 .map(PathBuf::from)
             );

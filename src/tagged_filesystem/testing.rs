@@ -1,4 +1,5 @@
 use std::{
+    borrow::Borrow,
     fs::{remove_dir_all, remove_file, File},
     process::{Command, Stdio},
     thread,
@@ -8,6 +9,8 @@ use std::{
 use crate::{NameRef, TagRef};
 
 use super::*;
+
+pub use tagged_paths_with_names::*;
 
 pub fn tagged_filesystem<P>(dir: P) -> TaggedFilesystem
 where
@@ -38,20 +41,22 @@ where
     fs
 }
 
-pub fn tagged_filesystem_with<P, Q>(dir: P, paths: impl IntoIterator<Item = Q>) -> TaggedFilesystem
+pub fn tagged_filesystem_with<P, Q, N>(
+    dir: P,
+    paths: impl IntoIterator<Item = impl Borrow<(Q, N)>>,
+) -> TaggedFilesystem
 where
     P: AsRef<Path>,
     Q: AsRef<Path>,
+    N: AsRef<NameRef>,
 {
     let filesystem = tagged_filesystem(dir);
     create_dir_all(filesystem.root.metadata().join("tags")).unwrap();
-    for path in paths.into_iter() {
+    for tup in paths.into_iter() {
+        let (path, name) = tup.borrow();
         let tagged_path = TaggedPath::from_path(path.as_ref()).unwrap();
-        filesystem.touch(
-            tagged_path.tags().map(|tag| tag.to_owned()),
-            tagged_path.name(),
-        );
-        filesystem.symlink_file(&tagged_path);
+        filesystem.touch(tagged_path.tags().map(|tag| tag.to_owned()), name);
+        filesystem.symlink_file(&tagged_path, name);
     }
     filesystem
 }
@@ -142,9 +147,12 @@ impl TaggedFilesystem {
             .join("tag")
     }
 
-    pub fn symlink_file(&self, path: &TaggedPath) {
+    pub fn symlink_file<N>(&self, path: &TaggedPath, name: N)
+    where
+        N: AsRef<NameRef>,
+    {
         create_dir_all(self.root.join(path).parent().unwrap()).unwrap();
-        symlink_file(self.root.file(path.name()), self.root.join(path)).unwrap();
+        symlink_file(self.root.file(name), self.root.join(path)).unwrap();
     }
 }
 
@@ -182,4 +190,85 @@ fn list_files_(root: &Path, mut queue: Vec<PathBuf>) -> Vec<PathBuf> {
     }
     files.sort();
     files
+}
+
+mod tagged_paths_with_names {
+    use proptest::prelude::*;
+
+    use crate::{
+        testing::{TaggedPaths, TaggedPathsParams},
+        Name, TaggedPath, EXT_SEPARATOR, INLINE_SEPARATOR, TAG_IGNORE,
+    };
+
+    #[derive(Debug, Clone)]
+    pub struct TaggedPathsWithNames(pub Vec<(TaggedPath, Name)>);
+
+    impl TaggedPathsWithNames {
+        pub fn iter(&self) -> std::slice::Iter<'_, (TaggedPath, Name)> {
+            self.0.iter()
+        }
+
+        pub fn len(&self) -> usize {
+            self.0.len()
+        }
+    }
+
+    impl IntoIterator for TaggedPathsWithNames {
+        type Item = (TaggedPath, Name);
+        type IntoIter = <Vec<(TaggedPath, Name)> as IntoIterator>::IntoIter;
+
+        fn into_iter(self) -> Self::IntoIter {
+            self.0.into_iter()
+        }
+    }
+
+    impl<'a> IntoIterator for &'a TaggedPathsWithNames {
+        type Item = &'a (TaggedPath, Name);
+        type IntoIter = <&'a [(TaggedPath, Name)] as IntoIterator>::IntoIter;
+
+        fn into_iter(self) -> Self::IntoIter {
+            self.iter()
+        }
+    }
+
+    impl Arbitrary for TaggedPathsWithNames {
+        type Parameters = TaggedPathsParams;
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+            TaggedPaths::arbitrary_with(params)
+                .prop_flat_map(|paths| {
+                    paths
+                        .into_iter()
+                        .map(|path| {
+                            let name = Name::arbitrary_with(Some(path.ext().to_owned()));
+                            (Just(path), name)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .prop_map(|paths| {
+                    paths
+                        .into_iter()
+                        .map(|(path, name)| {
+                            let tags_str = path
+                                .as_path()
+                                .as_os_str()
+                                .to_str()
+                                .unwrap()
+                                .split_once(EXT_SEPARATOR)
+                                .unwrap()
+                                .0;
+                            let path = TaggedPath::new(format!(
+                                "{}{INLINE_SEPARATOR}{TAG_IGNORE}{}",
+                                tags_str, name
+                            ))
+                            .unwrap();
+                            (path, name)
+                        })
+                        .collect()
+                })
+                .prop_map(TaggedPathsWithNames)
+                .boxed()
+        }
+    }
 }

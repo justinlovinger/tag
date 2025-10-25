@@ -13,8 +13,8 @@ struct Args {
 enum Commands {
     /// Print tags in the given path
     Tags { path: TaggedPath },
-    /// Print the name of the given path
-    Name { path: TaggedPath },
+    /// Print the extension of the given path
+    Ext { path: TaggedPath },
 }
 
 fn main() {
@@ -22,7 +22,7 @@ fn main() {
 
     match args.command {
         Some(Commands::Tags { path }) => print!("{}", path.tags().format("\n")),
-        Some(Commands::Name { path }) => println!("{}", path.name()),
+        Some(Commands::Ext { path }) => println!("{}", path.ext()),
         None => {}
     }
 }
