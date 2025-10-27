@@ -93,6 +93,6 @@ impl TagsScript {
 
 impl Drop for TagsScript {
     fn drop(&mut self) {
-        let _ = self.script.kill();
+        let _ = self.script.wait();
     }
 }

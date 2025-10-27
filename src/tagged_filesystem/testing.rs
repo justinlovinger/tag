@@ -1,12 +1,11 @@
 use std::{
     borrow::Borrow,
     fs::{remove_dir_all, remove_file, File},
-    process::{Command, Stdio},
     thread,
     time::Duration,
 };
 
-use crate::{NameRef, TagRef};
+use crate::{tags_script::TagsScript, NameRef, TagRef};
 
 use super::*;
 
@@ -20,21 +19,15 @@ where
 
     // The OS will sometimes fail to close the tags-script as quickly as it should,
     // leading to an error when trying to execute it.
-    for _ in 0..100 {
+    for i in 0..100 {
         // Note,
         // this should only wait for `ExecutableFileBusy`,
         // but that kind is unstable as of writing this.
-        match Command::new(fs.root.tags())
-            .current_dir(fs.root.as_path())
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .spawn()
-        {
-            Ok(mut x) => {
-                let _ = x.kill();
+        match TagsScript::new(&fs.root) {
+            Ok(_) => {
                 break;
             }
-            Err(_) => thread::sleep(Duration::from_millis(1)),
+            Err(_) => thread::sleep(Duration::from_millis(i)),
         }
     }
 
