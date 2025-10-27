@@ -91,7 +91,7 @@ impl Borrow<NameRef> for Name {
     }
 }
 
-impl<'a> Borrow<NameRef> for &'a Name {
+impl Borrow<NameRef> for &Name {
     fn borrow(&self) -> &NameRef {
         (*self).borrow()
     }

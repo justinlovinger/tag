@@ -26,9 +26,9 @@ pub(crate) fn organize(paths: &[TaggedPath]) -> Vec<MoveOp> {
 
 fn sort(paths: &[TaggedPath]) -> Vec<(&TaggedPath, Vec<Intern<Tag>>)> {
     fn sort_inner(
-        paths: Partition,
+        paths: Partition<'_>,
         prefix: Vec<Intern<Tag>>,
-    ) -> Vec<(&TaggedPath, Vec<Intern<Tag>>)> {
+    ) -> Vec<(&'_ TaggedPath, Vec<Intern<Tag>>)> {
         stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
             if let Some(tag) = tag_to_split(paths.tags_paths()) {
                 let (with_tag, without_tag) = paths.partition(tag);
@@ -100,7 +100,7 @@ where
                         .skip(i + 1)
                         .find(|(_, (_, tags))| {
                             tags.get(tag_index)
-                                .map_or(true, |other| other.as_ref() != tag.as_ref())
+                                .is_none_or(|other| other.as_ref() != tag.as_ref())
                         })
                         .map(|(j, _)| j)
                         .unwrap_or(sorted.len());
@@ -828,7 +828,7 @@ mod partition {
             self.paths_tags.len()
         }
 
-        pub fn tags_paths(&self) -> &TagsPaths {
+        pub fn tags_paths(&'_ self) -> &'_ TagsPaths<'_> {
             &self.tags_paths
         }
 

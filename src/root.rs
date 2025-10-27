@@ -44,7 +44,7 @@ impl Root {
                     .map_while(|path| path.strip_prefix(root.as_path()).ok())
                     .take_while(|path| path != &PathBuf::new().as_path())
                 {
-                    if path.parent().map_or(false, |parent| {
+                    if path.parent().is_some_and(|parent| {
                         parent.ends_with(PathBuf::from(METADATA_DIR).join(FILES_DIR))
                     }) {
                         return Ok(None);

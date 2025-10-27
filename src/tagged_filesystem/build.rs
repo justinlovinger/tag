@@ -161,9 +161,9 @@ impl TaggedFilesystem {
         Ok(names)
     }
 
-    fn some_build_paths<'a>(
+    fn some_build_paths(
         &self,
-        names: &FxHashSet<&'a Name>,
+        names: &FxHashSet<&Name>,
         considered_names: &[Name],
     ) -> Result<BuildPaths, BuildError> {
         let mut tags_script = TagsScript::new(&self.root)?;
@@ -175,7 +175,7 @@ impl TaggedFilesystem {
             self.tagged_paths_with_names()
                 .partition::<Vec<_>, _>(|(_, name)| {
                     name.as_ref()
-                        .map_or(false, |name| considered_names.contains(name))
+                        .is_some_and(|name| considered_names.contains(name))
                 });
         let (paths, excluded_paths) = paths.into_iter().partition::<Vec<_>, _>(|(_, name)| {
             let name = name

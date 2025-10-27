@@ -87,7 +87,7 @@ impl Borrow<ExtRef> for Ext {
     }
 }
 
-impl<'a> Borrow<ExtRef> for &'a Ext {
+impl Borrow<ExtRef> for &Ext {
     fn borrow(&self) -> &ExtRef {
         (*self).borrow()
     }

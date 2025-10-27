@@ -28,8 +28,6 @@ pub enum InitError {
 }
 
 impl TaggedFilesystem {
-    #[allow(clippy::new_without_default)]
-
     pub fn init<P>(dir: P) -> Result<Self, InitError>
     where
         P: AsRef<Path>,
