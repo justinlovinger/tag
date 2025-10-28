@@ -1403,6 +1403,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let considered_paths = add_tag(considered_paths);
+        let ignored_paths = add_tag(ignored_paths);
         let other_paths = add_tag(other_paths);
 
         let (actual, expected) = with_temp_dir(|dir| {
