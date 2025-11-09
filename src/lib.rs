@@ -14,6 +14,7 @@ mod testing;
 pub use crate::{
     ext::{Ext, ExtRef},
     name::{Name, NameRef},
+    organize::{combine, sort_tags_by_subfrequency},
     root::Root,
     tag::{Tag, TagRef},
     tagged_filesystem::{TaggedFilesystem, TaggedFilesystemBuilder},

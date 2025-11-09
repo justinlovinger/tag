@@ -118,6 +118,13 @@ mod tagged_path {
 
     use super::{SEPARATOR_REGEX, TAGS};
 
+    pub fn tagged_path<S>(s: S) -> TaggedPath
+    where
+        S: Into<String>,
+    {
+        TaggedPath::new(s).unwrap()
+    }
+
     pub struct TaggedPathParams {
         pub min_tags: usize,
         pub max_tags: usize,

@@ -9,7 +9,7 @@ use clap::{Parser, Subcommand};
 use tag::{Name, Tag, TaggedFilesystem, TaggedFilesystemBuilder};
 
 #[derive(Parser)]
-#[clap(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None)]
 struct Args {
     /// Use given path as working directory
     ///
@@ -52,17 +52,17 @@ enum Commands {
         ///
         /// If empty,
         /// build all files.
-        #[clap(required = false, value_name = "NAME")]
+        #[arg(required = false, value_name = "NAME")]
         names: Option<Vec<Name>>,
     },
     /// Print tagged paths of files with given tags
     Find {
         /// Find files including *all* these tags
-        #[clap(value_name = "TAG")]
+        #[arg(value_name = "TAG")]
         include: Vec<Tag>,
 
         /// Ignore files including *any* of these tags
-        #[clap(long, short, value_name = "TAG")]
+        #[arg(long, short, value_name = "TAG")]
         exclude: Vec<Tag>,
     },
 }

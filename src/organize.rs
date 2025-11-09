@@ -6,16 +6,66 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::{
-    tagged_filesystem::MoveOp, Tag, TagRef, TaggedPath, DIR_SEPARATOR, EXT_SEPARATOR,
+    tagged_filesystem::MoveOp, ExtRef, Tag, TagRef, TaggedPath, DIR_SEPARATOR, EXT_SEPARATOR,
     INLINE_SEPARATOR, PATH_PART_MAX_LEN, TAG_IGNORE,
 };
 
 use self::partition::{Partition, TagsPaths};
 
+pub fn sort_tags_by_subfrequency(paths: &[TaggedPath]) -> impl Iterator<Item = TaggedPath> + '_ {
+    let mut res = sort_tags_by_subfrequency_(paths);
+    res.sort_by_key(|(i, (_, _))| *i);
+    res.into_iter().map(|(_, (orig, tags))| {
+        from_tags_with_ignored(&tags, &orig.ignored_tags().collect::<Vec<_>>(), orig.ext())
+    })
+}
+
+fn from_tags_with_ignored<T, J, E>(tags: &[T], ignored_tags: &[J], ext: E) -> TaggedPath
+where
+    T: AsRef<TagRef>,
+    J: AsRef<str>,
+    E: AsRef<ExtRef>,
+{
+    let sep = if tags.is_empty() || ignored_tags.is_empty() {
+        String::new()
+    } else {
+        INLINE_SEPARATOR.to_string()
+    };
+    TaggedPath::new(format!(
+        "{}{sep}{}{EXT_SEPARATOR}{}",
+        tags.iter()
+            .map(|tag| tag.as_ref())
+            .format(INLINE_SEPARATOR.to_string().as_str()),
+        ignored_tags
+            .iter()
+            .format_with(INLINE_SEPARATOR.to_string().as_str(), |s, f| {
+                f(&TAG_IGNORE)?;
+                f(&s.as_ref())
+            }),
+        ext.as_ref(),
+    ))
+    .unwrap()
+}
+
+pub fn combine(paths: &[TaggedPath]) -> impl Iterator<Item = PathBuf> + '_ {
+    let mut res = combine_(
+        paths
+            .iter()
+            .map(|path| {
+                let tags = path.tags().map(|tag| tag.to_owned()).collect();
+                (path, tags)
+            })
+            .enumerate()
+            .collect(),
+    );
+    res.sort_by_key(|(i, (_, _))| *i);
+    res.into_iter().map(|(_, (_, path))| path)
+}
+
 pub(crate) fn organize(paths: &[TaggedPath]) -> Vec<MoveOp> {
-    combine(sort(paths))
+    combine_(sort_tags_by_subfrequency_(paths))
         .into_iter()
-        .filter_map(|(path, to)| {
+        .filter_map(|(_, (path, to))| {
             (path.as_path() != to).then(|| MoveOp {
                 from: path.as_path().to_owned(),
                 to,
@@ -24,11 +74,9 @@ pub(crate) fn organize(paths: &[TaggedPath]) -> Vec<MoveOp> {
         .collect()
 }
 
-fn sort(paths: &[TaggedPath]) -> Vec<(&TaggedPath, Vec<Intern<Tag>>)> {
-    fn sort_inner(
-        paths: Partition<'_>,
-        prefix: Vec<Intern<Tag>>,
-    ) -> Vec<(&'_ TaggedPath, Vec<Intern<Tag>>)> {
+type SortedTags<'a> = Vec<(usize, (&'a TaggedPath, Vec<Intern<Tag>>))>;
+fn sort_tags_by_subfrequency_(paths: &[TaggedPath]) -> SortedTags<'_> {
+    fn sort_inner(paths: Partition<'_>, prefix: Vec<Intern<Tag>>) -> SortedTags<'_> {
         stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
             if let Some(tag) = tag_to_split(paths.tags_paths()) {
                 let (with_tag, without_tag) = paths.partition(tag);
@@ -45,7 +93,7 @@ fn sort(paths: &[TaggedPath]) -> Vec<(&TaggedPath, Vec<Intern<Tag>>)> {
                 debug_assert_eq!(paths.tags_paths().len(), 0);
                 paths
                     .finalize()
-                    .map(|(path, mut inline_tags)| {
+                    .map(|(i, path, mut inline_tags)| {
                         // Unstable sort is fine because every tag should be unique.
                         inline_tags.sort_unstable_by(|tag, other| {
                             tag.len()
@@ -53,7 +101,10 @@ fn sort(paths: &[TaggedPath]) -> Vec<(&TaggedPath, Vec<Intern<Tag>>)> {
                                 .reverse()
                                 .then_with(|| tag.cmp(other))
                         });
-                        (path, prefix.iter().copied().chain(inline_tags).collect())
+                        (
+                            i,
+                            (path, prefix.iter().copied().chain(inline_tags).collect()),
+                        )
                     })
                     .collect()
             }
@@ -76,29 +127,31 @@ fn sort(paths: &[TaggedPath]) -> Vec<(&TaggedPath, Vec<Intern<Tag>>)> {
     sort_inner(Partition::new(paths), Default::default())
 }
 
-fn combine<T>(mut tags: Vec<(&TaggedPath, Vec<T>)>) -> Vec<(&TaggedPath, PathBuf)>
+fn combine_<T>(
+    mut paths: Vec<(usize, (&TaggedPath, Vec<T>))>,
+) -> Vec<(usize, (&TaggedPath, PathBuf))>
 where
     T: AsRef<TagRef>,
 {
     fn combine_inner<'a, T>(
-        sorted: &[(&'a TaggedPath, Vec<T>)],
+        sorted: &[(usize, (&'a TaggedPath, Vec<T>))],
         prefix: PathBuf,
         tag_index: usize,
-    ) -> Vec<(&'a TaggedPath, PathBuf)>
+    ) -> Vec<(usize, (&'a TaggedPath, PathBuf))>
     where
         T: AsRef<TagRef>,
     {
         let mut res = Vec::new();
         let mut i = 0;
         let mut without_tags: FxHashMap<_, Vec<_>> = FxHashMap::default();
-        while let Some((path, tags)) = sorted.get(i) {
+        while let Some((orig_i, (path, tags))) = sorted.get(i) {
             match tags.get(tag_index) {
                 Some(tag) => {
                     let j = sorted
                         .iter()
                         .enumerate()
                         .skip(i + 1)
-                        .find(|(_, (_, tags))| {
+                        .find(|(_, (_, (_, tags)))| {
                             tags.get(tag_index)
                                 .is_none_or(|other| other.as_ref() != tag.as_ref())
                         })
@@ -128,34 +181,37 @@ where
                             })
                             .collect::<SmallVec<[char; 8]>>(); // `SmallVec` should handle most cases without heap-allocation.
                         res.push((
-                            *path,
-                            prefix.join(format!(
-                                "{}{}{}",
-                                inline_tags
-                                    .iter()
-                                    .zip(separators.into_iter().map(Some).chain([None]))
-                                    .format_with("", |(tag, sep), f| {
-                                        f(&tag.as_ref())?;
-                                        if let Some(sep) = sep {
-                                            f(&sep)?;
-                                        }
-                                        Ok(())
-                                    }),
-                                if len
-                                    + inline_tags.last().map_or(0, |tag| tag.as_ref().len())
-                                    + EXT_SEPARATOR.len_utf8()
-                                    + path.ext().len()
-                                    <= PATH_PART_MAX_LEN
-                                {
-                                    EXT_SEPARATOR.to_string()
-                                } else {
-                                    format!("{DIR_SEPARATOR}{TAG_IGNORE}{EXT_SEPARATOR}")
-                                },
-                                path.ext(),
-                            )),
+                            *orig_i,
+                            (
+                                *path,
+                                prefix.join(format!(
+                                    "{}{}{}",
+                                    inline_tags
+                                        .iter()
+                                        .zip(separators.into_iter().map(Some).chain([None]))
+                                        .format_with("", |(tag, sep), f| {
+                                            f(&tag.as_ref())?;
+                                            if let Some(sep) = sep {
+                                                f(&sep)?;
+                                            }
+                                            Ok(())
+                                        }),
+                                    if len
+                                        + inline_tags.last().map_or(0, |tag| tag.as_ref().len())
+                                        + EXT_SEPARATOR.len_utf8()
+                                        + path.ext().len()
+                                        <= PATH_PART_MAX_LEN
+                                    {
+                                        EXT_SEPARATOR.to_string()
+                                    } else {
+                                        format!("{DIR_SEPARATOR}{TAG_IGNORE}{EXT_SEPARATOR}")
+                                    },
+                                    path.ext(),
+                                )),
+                            ),
                         ));
                     } else {
-                        let (_, tags_of_last) = &sorted[j - 1];
+                        let (_, (_, tags_of_last)) = &sorted[j - 1];
                         let next_tag_index = tags
                             .iter()
                             .zip(tags_of_last)
@@ -205,7 +261,10 @@ where
                     i = j;
                 }
                 None => {
-                    without_tags.entry(path.ext()).or_default().push(*path);
+                    without_tags
+                        .entry(path.ext())
+                        .or_default()
+                        .push((*orig_i, *path));
                     i += 1;
                 }
             }
@@ -213,16 +272,19 @@ where
 
         for paths in without_tags.into_values() {
             if paths.len() == 1 {
-                let path = paths.into_iter().next().unwrap();
+                let (orig_i, path) = paths.into_iter().next().unwrap();
                 res.push((
-                    path,
-                    prefix.join(format!("{TAG_IGNORE}{EXT_SEPARATOR}{}", path.ext())),
+                    orig_i,
+                    (
+                        path,
+                        prefix.join(format!("{TAG_IGNORE}{EXT_SEPARATOR}{}", path.ext())),
+                    ),
                 ));
             } else {
                 let mut ids: BTreeSet<_> = (1..=paths.len()).collect();
                 let paths_ids: Vec<_> = paths
                     .iter()
-                    .map(|path| {
+                    .map(|(_, path)| {
                         path.ignored_tags()
                             // We explicitly want to remove from `ids`.
                             // `ids` should only contain ids not in `paths_ids`.
@@ -230,13 +292,16 @@ where
                             .next()
                     })
                     .collect();
-                for (path, id) in paths.into_iter().zip(paths_ids) {
+                for ((orig_i, path), id) in paths.into_iter().zip(paths_ids) {
                     let id = id.unwrap_or_else(|| {
                         ids.pop_first().expect("`ids` should contain enough ids")
                     });
                     res.push((
-                        path,
-                        prefix.join(format!("{TAG_IGNORE}{id}{EXT_SEPARATOR}{}", path.ext())),
+                        orig_i,
+                        (
+                            path,
+                            prefix.join(format!("{TAG_IGNORE}{id}{EXT_SEPARATOR}{}", path.ext())),
+                        ),
                     ));
                 }
             }
@@ -245,7 +310,7 @@ where
         res
     }
 
-    tags.sort_by(|(_, tags), (_, other)| {
+    paths.sort_by(|(_, (_, tags)), (_, (_, other))| {
         tags.iter()
             .map(|tag| tag.as_ref())
             .cmp(other.iter().map(|tag| tag.as_ref()))
@@ -254,153 +319,111 @@ where
             // at a given recursive step.
             .reverse()
     });
-    combine_inner(&tags, PathBuf::new(), 0)
+    combine_inner(&paths, PathBuf::new(), 0)
 }
 
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
-    use rustc_hash::FxHashSet;
     use test_strategy::proptest;
 
-    use crate::testing::{ext, tag, TaggedPaths};
+    use crate::testing::{tagged_path, TaggedPaths};
 
     use super::*;
 
     #[test]
-    fn combine_separates_different_prefixes_by_inline() {
-        let paths = [
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-        ];
+    fn sort_tags_sorts_by_frequency_within_subsets() {
         assert_eq!(
-            combine(vec![
-                (&paths[0], vec![tag("bar"), tag("foo")]),
-                (&paths[1], vec![tag("baz"), tag("bin")]),
-            ]),
-            vec![
-                (&paths[1], PathBuf::from("baz-bin.x")),
-                (&paths[0], PathBuf::from("bar-foo.x")),
+            sort_tags_by_subfrequency(&[
+                tagged_path("foo.x"),
+                tagged_path("foo.x"),
+                tagged_path("bar-foo.x"),
+                tagged_path("baz-foo-bar.x"),
+                tagged_path("baz.x"),
+                tagged_path("baz.x"),
+            ])
+            .collect::<Vec<_>>(),
+            [
+                tagged_path("foo.x"),
+                tagged_path("foo.x"),
+                tagged_path("foo-bar.x"),
+                tagged_path("foo-bar-baz.x"),
+                tagged_path("baz.x"),
+                tagged_path("baz.x"),
             ]
+        )
+    }
+
+    #[test]
+    fn sort_tags_breaks_ties_in_favor_of_increasing_length() {
+        assert_eq!(
+            sort_tags_by_subfrequency(&[tagged_path("a-bb.x")]).collect::<Vec<_>>(),
+            [tagged_path("bb-a.x")]
+        )
+    }
+
+    #[proptest]
+    fn sort_tags_is_idempotent(paths: TaggedPaths) {
+        let expected = sort_tags_by_subfrequency(&paths.0).collect::<Vec<_>>();
+        assert_eq!(
+            sort_tags_by_subfrequency(&expected).collect::<Vec<_>>(),
+            expected
+        )
+    }
+
+    #[test]
+    fn combine_separates_different_prefixes_by_inline() {
+        assert_eq!(
+            combine(&[tagged_path("foo-bar.x"), tagged_path("baz-bin.x")]).collect::<Vec<_>>(),
+            [PathBuf::from("foo-bar.x"), PathBuf::from("baz-bin.x")]
         );
     }
 
     #[test]
     fn combine_separates_common_prefixes_by_dir() {
-        let paths = [
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-        ];
         assert_eq!(
-            combine(vec![
-                (&paths[0], vec![tag("foo"), tag("bar")]),
-                (&paths[1], vec![tag("foo"), tag("baz")]),
-            ]),
-            vec![
-                (&paths[1], PathBuf::from("foo/baz.x")),
-                (&paths[0], PathBuf::from("foo/bar.x")),
-            ]
+            combine(&[tagged_path("foo-bar.x"), tagged_path("foo-baz.x")]).collect::<Vec<_>>(),
+            [PathBuf::from("foo/bar.x"), PathBuf::from("foo/baz.x")]
         );
     }
 
     #[test]
     fn combine_separates_by_dir_and_inline() {
-        let paths = [
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-        ];
         assert_eq!(
-            combine(vec![
-                (
-                    &paths[0],
-                    vec![
-                        Tag::new("foo").unwrap(),
-                        Tag::new("bar").unwrap(),
-                        Tag::new("baz").unwrap(),
-                    ]
-                ),
-                (
-                    &paths[1],
-                    vec![
-                        Tag::new("foo").unwrap(),
-                        Tag::new("baz").unwrap(),
-                        Tag::new("bar").unwrap(),
-                    ]
-                )
-            ]),
-            vec![
-                (&paths[1], PathBuf::from("foo/baz-bar.x")),
-                (&paths[0], PathBuf::from("foo/bar-baz.x")),
+            combine(&[tagged_path("foo-bar-baz.x"), tagged_path("foo-baz-bar.x")])
+                .collect::<Vec<_>>(),
+            [
+                PathBuf::from("foo/bar-baz.x"),
+                PathBuf::from("foo/baz-bar.x")
             ]
         );
     }
 
     #[test]
     fn combine_uses_inline_in_common_prefixes() {
-        let paths = [
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-        ];
         assert_eq!(
-            combine(vec![
-                (
-                    &paths[0],
-                    vec![
-                        Tag::new("foo").unwrap(),
-                        Tag::new("bar").unwrap(),
-                        Tag::new("baz").unwrap(),
-                    ]
-                ),
-                (
-                    &paths[1],
-                    vec![
-                        Tag::new("foo").unwrap(),
-                        Tag::new("bar").unwrap(),
-                        Tag::new("bin").unwrap(),
-                    ]
-                )
-            ]),
-            vec![
-                (&paths[1], PathBuf::from("foo-bar/bin.x")),
-                (&paths[0], PathBuf::from("foo-bar/baz.x")),
+            combine(&[tagged_path("foo-bar-baz.x"), tagged_path("foo-bar-bin.x")])
+                .collect::<Vec<_>>(),
+            [
+                PathBuf::from("foo-bar/baz.x"),
+                PathBuf::from("foo-bar/bin.x"),
             ]
         );
     }
 
     #[test]
     fn combine_does_not_use_inline_in_common_prefix_if_not_all_common() {
-        let paths = [
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-        ];
         assert_eq!(
-            combine(vec![
-                (
-                    &paths[0],
-                    vec![
-                        Tag::new("foo").unwrap(),
-                        Tag::new("bar").unwrap(),
-                        Tag::new("baz").unwrap(),
-                    ]
-                ),
-                (
-                    &paths[1],
-                    vec![
-                        Tag::new("foo").unwrap(),
-                        Tag::new("bar").unwrap(),
-                        Tag::new("bin").unwrap(),
-                    ]
-                ),
-                (
-                    &paths[2],
-                    vec![Tag::new("foo").unwrap(), Tag::new("bin").unwrap()]
-                ),
-            ]),
-            vec![
-                (&paths[2], PathBuf::from("foo/bin.x")),
-                (&paths[1], PathBuf::from("foo/bar/bin.x")),
-                (&paths[0], PathBuf::from("foo/bar/baz.x")),
+            combine(&[
+                tagged_path("foo-bar-baz.x"),
+                tagged_path("foo-bar-bin.x"),
+                tagged_path("foo-bin.x"),
+            ])
+            .collect::<Vec<_>>(),
+            [
+                PathBuf::from("foo/bar/baz.x"),
+                PathBuf::from("foo/bar/bin.x"),
+                PathBuf::from("foo/bin.x"),
             ]
         );
     }
@@ -410,34 +433,15 @@ mod tests {
         let a = "a".repeat(100);
         let b = "b".repeat(100);
         let c = "c".repeat(100);
-        let paths = [
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-        ];
         assert_eq!(
-            combine(vec![
-                (
-                    &paths[0],
-                    vec![
-                        Tag::new(&a).unwrap(),
-                        Tag::new(&b).unwrap(),
-                        Tag::new(&c).unwrap(),
-                        Tag::new("baz").unwrap(),
-                    ]
-                ),
-                (
-                    &paths[1],
-                    vec![
-                        Tag::new(&a).unwrap(),
-                        Tag::new(&b).unwrap(),
-                        Tag::new(&c).unwrap(),
-                        Tag::new("bin").unwrap(),
-                    ]
-                )
-            ]),
-            vec![
-                (&paths[1], PathBuf::from(format!("{a}-{b}/{c}/bin.x"))),
-                (&paths[0], PathBuf::from(format!("{a}-{b}/{c}/baz.x"))),
+            combine(&[
+                tagged_path(format!("{a}-{b}-{c}-baz.x")),
+                tagged_path(format!("{a}-{b}-{c}-bin.x")),
+            ])
+            .collect::<Vec<_>>(),
+            [
+                PathBuf::from(format!("{a}-{b}/{c}/baz.x")),
+                PathBuf::from(format!("{a}-{b}/{c}/bin.x")),
             ]
         );
     }
@@ -447,90 +451,48 @@ mod tests {
         let a = "a".repeat(100);
         let b = "b".repeat(100);
         let c = "c".repeat(100);
-        let paths = [
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-        ];
         assert_eq!(
-            combine(vec![
-                (&paths[0], vec![Tag::new("foo").unwrap()]),
-                (
-                    &paths[1],
-                    vec![
-                        Tag::new("foo").unwrap(),
-                        Tag::new(&a).unwrap(),
-                        Tag::new(&b).unwrap(),
-                        Tag::new(&c).unwrap(),
-                    ]
-                ),
-            ]),
-            vec![
-                (&paths[1], PathBuf::from(format!("foo/{a}-{b}/{c}.x"))),
-                (&paths[0], PathBuf::from("foo/_.x")),
+            combine(&[
+                tagged_path("foo.x"),
+                tagged_path(format!("foo-{a}-{b}-{c}.x")),
+            ])
+            .collect::<Vec<_>>(),
+            [
+                PathBuf::from("foo/_.x"),
+                PathBuf::from(format!("foo/{a}-{b}/{c}.x")),
             ]
         );
     }
 
     #[test]
     fn combine_adds_ignored_tag() {
-        let paths = [TaggedPath::from_tags::<Tag, _>(
-            &FxHashSet::default(),
-            ext("x"),
-        )];
         assert_eq!(
-            combine::<Tag>(vec![(&paths[0], vec![])]),
-            vec![(&paths[0], PathBuf::from("_.x")),]
+            combine(&[tagged_path("_foo.x")]).collect::<Vec<_>>(),
+            [PathBuf::from("_.x")]
         );
     }
 
     #[test]
     fn combine_adds_different_ignored_tags_to_multiple_with_same_extension() {
-        let paths = [
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-        ];
         assert_eq!(
-            combine::<Tag>(vec![(&paths[0], vec![]), (&paths[1], vec![]),]),
-            vec![
-                (&paths[0], PathBuf::from("_1.x")),
-                (&paths[1], PathBuf::from("_2.x")),
-            ]
+            combine(&[tagged_path("_foo.x"), tagged_path("_foo.x")]).collect::<Vec<_>>(),
+            [PathBuf::from("_1.x"), PathBuf::from("_2.x")]
         );
     }
 
     #[test]
     fn combine_adds_same_ignored_tag_to_multiple_with_different_extensions() {
-        let paths = [
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("y")),
-        ];
         assert_eq!(
-            combine::<Tag>(vec![(&paths[0], vec![]), (&paths[1], vec![]),]),
-            vec![
-                (&paths[0], PathBuf::from("_.x")),
-                (&paths[1], PathBuf::from("_.y")),
-            ]
+            combine(&[tagged_path("_foo.x"), tagged_path("_foo.y")]).collect::<Vec<_>>(),
+            [PathBuf::from("_.x"), PathBuf::from("_.y")]
         );
     }
 
     #[test]
     fn combine_adds_ignored_tag_after_slash() {
-        let paths = [
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")),
-        ];
         assert_eq!(
-            combine(vec![
-                (&paths[0], vec![Tag::new("a").unwrap()]),
-                (
-                    &paths[1],
-                    vec![Tag::new("a").unwrap(), Tag::new("b").unwrap()]
-                ),
-            ]),
-            vec![
-                (&paths[1], PathBuf::from("a/b.x")),
-                (&paths[0], PathBuf::from("a/_.x")),
-            ]
+            combine(&[tagged_path("a.x"), tagged_path("a-b.x"),]).collect::<Vec<_>>(),
+            [PathBuf::from("a/_.x"), PathBuf::from("a/b.x")]
         );
     }
 
@@ -539,53 +501,28 @@ mod tests {
         let a = "a".repeat(100);
         let b = "b".repeat(100);
         let c = "c".repeat(100);
-        let paths = [TaggedPath::from_tags::<Tag, _>(
-            &FxHashSet::default(),
-            ext(&c),
-        )];
         assert_eq!(
-            combine(vec![(
-                &paths[0],
-                vec![Tag::new(&a).unwrap(), Tag::new(&b).unwrap()]
-            )]),
-            vec![(&paths[0], PathBuf::from(format!("{a}-{b}/_.{c}")))]
+            combine(&[tagged_path(format!("{a}-{b}.{c}"))]).collect::<Vec<_>>(),
+            [PathBuf::from(format!("{a}-{b}/_.{c}"))]
         );
     }
 
     #[test]
     fn combine_reuses_ignored_tags() {
-        let paths = [
-            TaggedPath::new("_1.x").unwrap(),
-            TaggedPath::new("_2.x").unwrap(),
-        ];
         assert_eq!(
-            combine::<Tag>(vec![(&paths[0], vec![]), (&paths[1], vec![])]),
-            vec![
-                (&paths[0], PathBuf::from("_1.x")),
-                (&paths[1], PathBuf::from("_2.x")),
-            ]
+            combine(&[tagged_path("_1.x"), tagged_path("_2.x")]).collect::<Vec<_>>(),
+            [PathBuf::from("_1.x"), PathBuf::from("_2.x")]
         );
         assert_eq!(
-            combine::<Tag>(vec![(&paths[1], vec![]), (&paths[0], vec![])]),
-            vec![
-                (&paths[1], PathBuf::from("_2.x")),
-                (&paths[0], PathBuf::from("_1.x")),
-            ]
+            combine(&[tagged_path("_2.x"), tagged_path("_1.x")]).collect::<Vec<_>>(),
+            [PathBuf::from("_2.x"), PathBuf::from("_1.x")]
         );
     }
 
     #[proptest]
     fn combine_does_not_change_tags(paths: TaggedPaths) {
-        let paths = paths
-            .0
-            .iter()
-            .map(|path| (path.tags().map(|tag| tag.to_owned()).collect_vec(), path))
-            .map(|(tags, path)| (path, tags))
-            .collect::<Vec<_>>();
-        let (paths, new_paths): (Vec<_>, Vec<_>) = combine(paths).into_iter().unzip();
         prop_assert_eq!(
-            new_paths
-                .into_iter()
+            combine(&paths.0)
                 .map(|path| TaggedPath::from_path(path)
                     .unwrap()
                     .tags()
@@ -601,16 +538,8 @@ mod tests {
 
     #[proptest]
     fn combine_does_not_change_extensions(paths: TaggedPaths) {
-        let paths = paths
-            .0
-            .iter()
-            .map(|path| (path.tags().map(|tag| tag.to_owned()).collect_vec(), path))
-            .map(|(tags, path)| (path, tags))
-            .collect::<Vec<_>>();
-        let (paths, new_paths): (Vec<_>, Vec<_>) = combine(paths).into_iter().unzip();
         prop_assert_eq!(
-            new_paths
-                .into_iter()
+            combine(&paths.0)
                 .map(|path| TaggedPath::from_path(path).unwrap().ext().to_owned())
                 .collect_vec(),
             paths
@@ -624,7 +553,6 @@ mod tests {
 mod partition {
     use std::mem::replace;
 
-    use by_address::ByThinAddress;
     use internment::Intern;
     use itertools::{Either, Itertools};
     use rayon::prelude::*;
@@ -635,13 +563,14 @@ mod partition {
 
     #[derive(Debug)]
     pub struct Partition<'a> {
+        paths: &'a [TaggedPath],
         tags_paths: TagsPaths<'a>,
         paths_tags: PathsTags<'a>,
         done_paths: DonePaths<'a>,
     }
 
-    pub type TagsPaths<'a> = FxHashMap<Intern<Tag>, FxHashSet<ByThinAddress<&'a TaggedPath>>>;
-    type PathsTags<'a> = FxHashMap<ByThinAddress<&'a TaggedPath>, PathTags>;
+    pub type TagsPaths<'a> = FxHashMap<Intern<Tag>, FxHashSet<usize>>;
+    type PathsTags<'a> = FxHashMap<usize, PathTags>;
 
     #[derive(Debug, Default)]
     struct PathTags {
@@ -649,23 +578,24 @@ mod partition {
         inline_tags: SmallVec<[Intern<Tag>; 1]>,
     }
 
-    type DonePaths<'a> = Vec<(&'a TaggedPath, SmallVec<[Intern<Tag>; 1]>)>;
+    type DonePaths<'a> = Vec<(usize, SmallVec<[Intern<Tag>; 1]>)>;
 
     impl<'a> Partition<'a> {
         pub fn new(paths: &'a [TaggedPath]) -> Self {
-            let (paths_tags, done_paths): (PathsTags, _) = paths.iter().partition_map(|path| {
-                if path.tags_is_empty() {
-                    Either::Right((path, SmallVec::new()))
-                } else {
-                    Either::Left((
-                        ByThinAddress(path),
-                        PathTags {
-                            unused_tags: path.tags().map(Intern::from_ref).collect(),
-                            inline_tags: Default::default(),
-                        },
-                    ))
-                }
-            });
+            let (paths_tags, done_paths): (PathsTags, _) =
+                paths.iter().enumerate().partition_map(|(i, path)| {
+                    if path.tags_is_empty() {
+                        Either::Right((i, SmallVec::new()))
+                    } else {
+                        Either::Left((
+                            i,
+                            PathTags {
+                                unused_tags: path.tags().map(Intern::from_ref).collect(),
+                                inline_tags: Default::default(),
+                            },
+                        ))
+                    }
+                });
 
             let mut tags_paths: TagsPaths = Default::default();
             for (path, tags) in &paths_tags {
@@ -675,6 +605,7 @@ mod partition {
             }
 
             let mut this = Self {
+                paths,
                 tags_paths,
                 paths_tags,
                 done_paths,
@@ -705,12 +636,9 @@ mod partition {
             (with_tag, without_tag)
         }
 
-        fn _partition(
-            self,
-            tag: Intern<Tag>,
-            paths: FxHashSet<ByThinAddress<&'a TaggedPath>>,
-        ) -> (Self, Self) {
+        fn _partition(self, tag: Intern<Tag>, paths: FxHashSet<usize>) -> (Self, Self) {
             let mut with_tag = Self {
+                paths: self.paths,
                 tags_paths: Default::default(),
                 paths_tags: Default::default(),
                 done_paths: Default::default(),
@@ -721,7 +649,7 @@ mod partition {
                 let mut path_tags = without_tag.paths_tags.remove(&path).unwrap();
                 if path_tags.unused_tags.len() == 1 {
                     debug_assert!(path_tags.unused_tags.contains(&tag));
-                    with_tag.done_paths.push((path.0, path_tags.inline_tags));
+                    with_tag.done_paths.push((path, path_tags.inline_tags));
                 } else {
                     path_tags.unused_tags.remove(&tag);
                     for tag in &path_tags.unused_tags {
@@ -740,11 +668,7 @@ mod partition {
             (with_tag, without_tag)
         }
 
-        fn _partition_reverse(
-            mut self,
-            tag: Intern<Tag>,
-            paths: FxHashSet<ByThinAddress<&'a TaggedPath>>,
-        ) -> (Self, Self) {
+        fn _partition_reverse(mut self, tag: Intern<Tag>, paths: FxHashSet<usize>) -> (Self, Self) {
             let paths_without = self
                 .paths_tags
                 .par_iter()
@@ -758,13 +682,14 @@ mod partition {
                 let path_tags = self.paths_tags.get_mut(&path).unwrap();
                 if path_tags.unused_tags.len() == 1 {
                     debug_assert!(path_tags.unused_tags.contains(&tag));
-                    done_paths.push((path.0, self.paths_tags.remove(&path).unwrap().inline_tags));
+                    done_paths.push((path, self.paths_tags.remove(&path).unwrap().inline_tags));
                 } else {
                     path_tags.unused_tags.remove(&tag);
                 }
             }
 
             let mut without_tag = Self {
+                paths: self.paths,
                 tags_paths: Default::default(),
                 paths_tags: Default::default(),
                 done_paths: replace(&mut self.done_paths, done_paths),
@@ -798,7 +723,7 @@ mod partition {
                     if path_tags.unused_tags.len() == 1 {
                         debug_assert!(path_tags.unused_tags.contains(tag));
                         self.done_paths
-                            .push((path.0, self.paths_tags.remove(path).unwrap().inline_tags));
+                            .push((*path, self.paths_tags.remove(path).unwrap().inline_tags));
                     } else {
                         path_tags.unused_tags.remove(tag);
                     }
@@ -817,7 +742,7 @@ mod partition {
             debug_assert!(!self
                 .done_paths
                 .iter()
-                .any(|(path, _)| self.paths_tags.contains_key(&ByThinAddress(*path))))
+                .any(|(path, _)| self.paths_tags.contains_key(path)))
         }
 
         pub fn len(&self) -> usize {
@@ -834,8 +759,10 @@ mod partition {
 
         pub fn finalize(
             self,
-        ) -> impl Iterator<Item = (&'a TaggedPath, SmallVec<[Intern<Tag>; 1]>)> {
-            self.done_paths.into_iter()
+        ) -> impl Iterator<Item = (usize, &'a TaggedPath, SmallVec<[Intern<Tag>; 1]>)> {
+            self.done_paths
+                .into_iter()
+                .map(|(i, tags)| (i, self.paths.get(i).unwrap(), tags))
         }
     }
 }

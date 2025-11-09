@@ -50,7 +50,6 @@ Extensions can contain `.`.
 For example,
 `foo.tar.gz` has the extension `tar.gz`.
 Tagged paths cannot have the same tag more than once.
-Tag order is arbitrary.
 
 ## Terminology
 
