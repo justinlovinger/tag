@@ -1,17 +1,24 @@
+use core::panic;
 use std::{
     env::current_dir,
-    fs::{create_dir_all, read_dir},
-    io::Write,
+    fs::{create_dir_all, read, read_dir},
+    iter::empty,
+    mem,
     os::unix::fs::symlink,
-    path::PathBuf,
-    process::{Command, Stdio},
+    path::{Path, PathBuf},
+    process::Command,
     str::FromStr,
-    thread::scope,
+    sync::LazyLock,
 };
 
 use clap::Parser;
-use itertools::Itertools;
-use tag::{combine, sort_tags_by_subfrequency, Name, Root, TaggedPath};
+use itertools::{Either, Itertools};
+use regex::Regex;
+use rustc_hash::FxHashSet;
+use tag::{
+    combine, sort_tags_by_subfrequency, Name, NameRef, Root, TaggedPath, DIR_SEPARATOR,
+    EXT_SEPARATOR, INLINE_SEPARATOR,
+};
 
 #[derive(Parser)]
 #[command(author, version, about = "A script to create a view of tagged paths", long_about = None)]
@@ -33,27 +40,10 @@ fn main() {
         args.names
     };
 
-    let tags = {
-        let mut tags_script = Command::new(root.tags())
-            .current_dir(&root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let mut stdin = tags_script.stdin.take().unwrap();
-        scope(|s| {
-            s.spawn(|| {
-                writeln!(stdin, "{}", names.iter().format("\n")).unwrap();
-                drop(stdin); // Scoped threads don't end on their own, so we need to explicitly drop stdin.
-            });
-            String::from_utf8(tags_script.wait_with_output().unwrap().stdout).unwrap()
-        })
-    };
-    let tags = tags.split("\n\n").map(|s| s.split("\n"));
-
+    let tags = names.iter().map(|name| tags(&root, name));
     let exts = names
         .iter()
-        .map(|name| name.as_str().split_once(".").unwrap().1);
+        .map(|name| name.as_str().split_once(EXT_SEPARATOR).map_or("", |x| x.1));
 
     let targets = names.iter().map(|name| root.file(name));
     let tmp = PathBuf::from_str(
@@ -64,7 +54,7 @@ fn main() {
     .unwrap();
     let paths = tags
         .zip(exts)
-        .map(|(mut tags, ext)| format!("{}.{ext}", tags.join("-")))
+        .map(|(mut tags, ext)| format!("{}{EXT_SEPARATOR}{ext}", tags.join("-")))
         .map(|path| TaggedPath::new(path).unwrap())
         .collect::<Vec<_>>();
     let paths = sort_tags_by_subfrequency(&paths).collect::<Vec<_>>();
@@ -75,4 +65,83 @@ fn main() {
     }
 
     println!("{}", tmp.display());
+}
+
+fn tags<'a>(root: &'a Root, name: &'a NameRef) -> impl Iterator<Item = String> + 'a {
+    with_implied_tags(
+        root,
+        name_tags(name)
+            .map(|s| s.to_owned())
+            .chain(hashtag_tags(root, name))
+            .chain(legacy_tags(root, name)),
+    )
+}
+
+fn name_tags(name: &NameRef) -> impl Iterator<Item = &str> {
+    name.as_str()
+        .split_once(EXT_SEPARATOR)
+        .map_or(Either::Right(empty()), |x| {
+            Either::Left(x.0.split([INLINE_SEPARATOR, DIR_SEPARATOR]))
+        })
+}
+
+fn hashtag_tags(root: &Root, name: &NameRef) -> impl Iterator<Item = String> {
+    static RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?:^| )#([0-9A-Za-z][0-9A-Za-z_]*)").unwrap());
+    if name.as_str().ends_with(".md") {
+        let s = String::from_utf8(read(root.file(name)).unwrap()).unwrap();
+        Either::Left(
+            RE.find_iter(&s)
+                .map(|m| m.as_str().to_owned())
+                .collect::<Vec<_>>()
+                .into_iter(),
+        )
+    } else {
+        Either::Right(empty())
+    }
+}
+
+fn legacy_tags(root: &Root, name: &NameRef) -> impl Iterator<Item = String> {
+    tags_from_dir(root.metadata().join("legacy").join(name.as_path()))
+}
+
+fn with_implied_tags(
+    root: &Root,
+    tags: impl IntoIterator<Item = String>,
+) -> impl Iterator<Item = String> {
+    let mut new_tags = tags.into_iter().collect::<FxHashSet<_>>();
+    let mut tags = FxHashSet::default();
+    while !new_tags.is_empty() {
+        let newest_tags = new_tags
+            .iter()
+            .flat_map(|tag| tags_from_dir(root.metadata().join("implied").join(tag)))
+            .collect::<FxHashSet<_>>();
+        tags.extend(mem::take(&mut new_tags));
+        new_tags = newest_tags
+            .into_iter()
+            .filter(|tag| !tags.contains(tag))
+            .collect();
+    }
+    tags.into_iter()
+}
+
+fn tags_from_dir<P>(path: P) -> impl Iterator<Item = String>
+where
+    P: AsRef<Path>,
+{
+    match read_dir(path) {
+        Ok(dir) => Either::Left(dir.into_iter().map(|x| {
+            x.unwrap()
+                .path()
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned()
+        })),
+        Err(e) => match e.kind() {
+            std::io::ErrorKind::NotFound => Either::Right(empty()),
+            _ => panic!("{e}"),
+        },
+    }
 }
