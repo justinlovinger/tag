@@ -19,10 +19,25 @@
         naersk-lib = pkgs.callPackage naersk { };
       in
       {
-        defaultPackage = naersk-lib.buildPackage {
-          src = ./.;
-          doCheck = true;
+        packages = rec {
+          default = tag;
+
+          tag = naersk-lib.buildPackage {
+            src = ./.;
+            doCheck = true;
+          };
+
+          tag-view = naersk-lib.buildPackage {
+            pname = "tag-view";
+            src = ./.;
+            overrideMain = old: {
+              preConfigure = ''
+                cargo_build_options="$cargo_build_options --example tag-view"
+              '';
+            };
+          };
         };
+
         devShell =
           with pkgs;
           mkShell {
