@@ -1,26 +1,13 @@
-mod build;
 mod find;
-mod init;
-mod op;
 
 #[cfg(test)]
 mod testing;
 
-use std::{
-    fs::{create_dir, create_dir_all, read_link, remove_dir, rename},
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use itertools::Itertools;
-use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{
-    fs::{symlink_dir, symlink_file},
-    organize::organize,
-    Name, Root, Tag, TaggedPath, FILES_DIR, METADATA_DIR, TAGS_SCRIPT,
-};
-
-pub(crate) use self::op::*;
+use crate::{Root, Tag, TaggedPath, METADATA_DIR};
 
 #[derive(Debug)]
 pub struct TaggedFilesystemBuilder {
@@ -60,20 +47,6 @@ impl TaggedFilesystem {
     fn tagged_paths(&self) -> impl Iterator<Item = TaggedPath> {
         let (sender, receiver) = crossbeam_channel::unbounded();
         self.for_each_tagged_path(move |path| sender.send(path).unwrap());
-        receiver.into_iter()
-    }
-
-    fn tagged_paths_with_names(&self) -> impl Iterator<Item = (TaggedPath, Option<Name>)> {
-        fn maybe_name(path: PathBuf) -> Option<Name> {
-            Name::new(read_link(path).ok()?.file_name()?.to_str()?).ok()
-        }
-
-        let (sender, receiver) = crossbeam_channel::unbounded();
-        let root = self.root.as_path().to_owned();
-        self.for_each_tagged_path(move |path| {
-            let name = maybe_name(root.join(&path));
-            sender.send((path, name)).unwrap()
-        });
         receiver.into_iter()
     }
 
@@ -132,39 +105,6 @@ impl TaggedFilesystem {
                     }
                 }
             })
-        }
-    }
-}
-
-fn relevant_paths<'a>(
-    paths: impl IntoIterator<Item = &'a TaggedPath>,
-    mut other_paths: Vec<TaggedPath>,
-) -> Vec<TaggedPath> {
-    let mut include_empty = false;
-    let mut tags: FxHashSet<_> = paths
-        .into_iter()
-        .inspect(|path| include_empty = include_empty || path.tags_is_empty())
-        .flat_map(|path| path.tags())
-        .map(|tag| tag.to_owned())
-        .collect();
-    let mut relevant_paths = Vec::new();
-    loop {
-        let prev_tags_len = tags.len();
-        let mut i = 0;
-        while i < other_paths.len() {
-            let other_path = &other_paths[i];
-            if (include_empty && other_path.tags_is_empty())
-                || other_path.tags().any(|tag| tags.contains(tag))
-            {
-                let path = other_paths.swap_remove(i);
-                tags.extend(path.tags().map(|tag| tag.to_owned()));
-                relevant_paths.push(path);
-            } else {
-                i += 1;
-            }
-        }
-        if tags.len() == prev_tags_len {
-            return relevant_paths;
         }
     }
 }

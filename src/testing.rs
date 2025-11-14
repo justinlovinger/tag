@@ -2,7 +2,7 @@ use once_cell::sync::Lazy;
 
 use crate::{DIR_SEPARATOR, INLINE_SEPARATOR};
 
-pub use self::{ext::*, fs::*, name::*, tag::*, tagged_filesystem::*, tagged_path::*};
+pub use self::{ext::*, fs::*, tag::*, tagged_filesystem::*, tagged_path::*};
 
 static SEPARATOR_REGEX: Lazy<String> = Lazy::new(|| format!("[{INLINE_SEPARATOR}{DIR_SEPARATOR}]"));
 
@@ -264,46 +264,6 @@ mod ext {
             select(EXTS)
                 .prop_map(|x| Self::new(x.to_owned()).unwrap())
                 .boxed()
-        }
-    }
-}
-
-mod name {
-    use proptest::prelude::*;
-    use uuid::Uuid;
-
-    use crate::{Ext, Name, EXT_SEPARATOR};
-
-    pub fn name<S>(s: S) -> Name
-    where
-        S: Into<String>,
-    {
-        Name::new(s).unwrap()
-    }
-
-    impl Arbitrary for Name {
-        type Parameters = Option<Ext>;
-        type Strategy = BoxedStrategy<Self>;
-
-        fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
-            let ext = if let Some(ext) = params {
-                Just(ext).boxed()
-            } else {
-                Ext::arbitrary().boxed()
-            };
-            ext.prop_map(move |ext| {
-                // We specifically want unique names.
-                // That means not using Proptest to generate them.
-                // Proptest could shrink names into being non-unique.
-                // Note,
-                // `Just` may clone the given value,
-                // so we need to use `LazyJust` to ensure a new value is generated every time.
-                let mut name = Uuid::new_v4().simple().to_string();
-                name.push(EXT_SEPARATOR);
-                name.push_str(ext.as_str());
-                Name::new(name).unwrap()
-            })
-            .boxed()
         }
     }
 }

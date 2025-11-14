@@ -6,7 +6,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use tag::{Name, Tag, TaggedFilesystem, TaggedFilesystemBuilder};
+use tag::{Tag, TaggedFilesystemBuilder};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -26,35 +26,6 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Initialize metadata for tagged files
-    ///
-    /// The working directory will become the root of a tagged filesystem.
-    Init,
-    /// Rebuild tagged paths and clean tags
-    ///
-    /// - Remove tags for missing files
-    /// - Add an empty tag-directory for files with a missing tag-directory
-    /// - Remove tagged paths for missing files
-    /// - Add tagged paths for files missing them
-    /// - Remove extra tags from tagged paths
-    /// - Add missing tags to tagged paths
-    /// - Organize tagged paths
-    ///
-    /// Tags are split into directories,
-    /// most frequent first.
-    /// Ties are broken in favor of longer tags
-    /// and then lexicographical order.
-    /// Unique tags are inlined.
-    ///
-    /// Untagged files are not changed.
-    Build {
-        /// Names of files to clean up and build
-        ///
-        /// If empty,
-        /// build all files.
-        #[arg(required = false, value_name = "NAME")]
-        names: Option<Vec<Name>>,
-    },
     /// Print tagged paths of files with given tags
     Find {
         /// Find files including *all* these tags
@@ -74,21 +45,12 @@ fn main() -> anyhow::Result<()> {
         std::env::set_current_dir(path)?;
     }
 
-    if let Some(Commands::Init) = args.command {
-        TaggedFilesystem::init(current_dir()?)?;
-    } else {
-        let filesystem = TaggedFilesystemBuilder::new(current_dir()?)
-            .build()?
-            .expect("The working directory is not tagged. Please run `tag init` to initialize.");
-        match args.command {
-            Some(Commands::Init) => unreachable!(),
-            Some(Commands::Build { names }) => match names {
-                Some(names) => filesystem.build_some(names)?,
-                None => filesystem.build()?,
-            },
-            Some(Commands::Find { include, exclude }) => print(filesystem.find(include, exclude)?)?,
-            None => {}
-        }
+    let filesystem = TaggedFilesystemBuilder::new(current_dir()?)
+        .build()?
+        .expect("The working directory is not tagged. Please run `tag init` to initialize.");
+    match args.command {
+        Some(Commands::Find { include, exclude }) => print(filesystem.find(include, exclude)?)?,
+        None => {}
     }
 
     Ok(())

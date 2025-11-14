@@ -16,14 +16,14 @@ use itertools::{Either, Itertools};
 use regex::Regex;
 use rustc_hash::FxHashSet;
 use tag::{
-    combine, sort_tags_by_subfrequency, Name, NameRef, Root, TaggedPath, DIR_SEPARATOR,
+    combine, sort_tags_by_subfrequency, Root, TaggedFilesystemBuilder, TaggedPath, DIR_SEPARATOR,
     EXT_SEPARATOR, INLINE_SEPARATOR,
 };
 
 #[derive(Parser)]
 #[command(author, version, about = "A script to create a view of tagged paths", long_about = None)]
 struct Args {
-    names: Vec<Name>,
+    paths: Vec<PathBuf>,
 }
 
 fn main() {
@@ -31,65 +31,73 @@ fn main() {
 
     let root = Root::new(current_dir().unwrap()).unwrap().unwrap();
 
-    let names = if args.names.is_empty() {
-        read_dir(root.files())
+    let paths = if args.paths.is_empty() {
+        TaggedFilesystemBuilder::new(current_dir().unwrap())
+            .build()
             .unwrap()
-            .map(|path| Name::new(path.unwrap().file_name().into_string().unwrap()).unwrap())
+            .unwrap()
+            .find(Vec::new(), Vec::new())
+            .unwrap()
+            .map(|path| path.into_path())
             .collect()
     } else {
-        args.names
+        args.paths
     };
 
-    let tags = names.iter().map(|name| tags(&root, name));
-    let exts = names
-        .iter()
-        .map(|name| name.as_str().split_once(EXT_SEPARATOR).map_or("", |x| x.1));
+    let tags = paths.iter().map(|path| tags(&root, path));
+    let exts = paths.iter().map(|path| {
+        path.to_str()
+            .unwrap()
+            .split_once(EXT_SEPARATOR)
+            .map_or("", |x| x.1)
+    });
 
-    let targets = names.iter().map(|name| root.file(name));
+    let targets = paths.iter().map(|path| path.canonicalize().unwrap());
     let tmp = PathBuf::from_str(
         String::from_utf8(Command::new("mktemp").arg("-d").output().unwrap().stdout)
             .unwrap()
             .trim(),
     )
     .unwrap();
-    let paths = tags
+    let links = tags
         .zip(exts)
         .map(|(mut tags, ext)| format!("{}{EXT_SEPARATOR}{ext}", tags.join("-")))
         .map(|path| TaggedPath::new(path).unwrap())
         .collect::<Vec<_>>();
-    let paths = sort_tags_by_subfrequency(&paths).collect::<Vec<_>>();
-    let paths = combine(&paths).map(|path| tmp.join(path));
-    for (target, path) in targets.zip(paths) {
-        create_dir_all(path.parent().unwrap()).unwrap();
-        symlink(target, path).unwrap();
+    let links = sort_tags_by_subfrequency(&links).collect::<Vec<_>>();
+    let links = combine(&links).map(|path| tmp.join(path));
+    for (target, link) in targets.zip(links) {
+        create_dir_all(link.parent().unwrap()).unwrap();
+        symlink(target, link).unwrap();
     }
 
     println!("{}", tmp.display());
 }
 
-fn tags<'a>(root: &'a Root, name: &'a NameRef) -> impl Iterator<Item = String> + 'a {
+fn tags<'a>(root: &'a Root, path: &'a Path) -> impl Iterator<Item = String> + 'a {
     with_implied_tags(
         root,
-        name_tags(name)
+        path_tags(path)
             .map(|s| s.to_owned())
-            .chain(hashtag_tags(root, name))
-            .chain(legacy_tags(root, name)),
+            .chain(hashtag_tags(path))
+            .chain(legacy_tags(root, path)),
     )
 }
 
-fn name_tags(name: &NameRef) -> impl Iterator<Item = &str> {
-    name.as_str()
+fn path_tags(path: &Path) -> impl Iterator<Item = &str> {
+    path.to_str()
+        .unwrap()
         .split_once(EXT_SEPARATOR)
         .map_or(Either::Right(empty()), |x| {
             Either::Left(x.0.split([INLINE_SEPARATOR, DIR_SEPARATOR]))
         })
 }
 
-fn hashtag_tags(root: &Root, name: &NameRef) -> impl Iterator<Item = String> {
+fn hashtag_tags(path: &Path) -> impl Iterator<Item = String> {
     static RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?:^| )#([0-9A-Za-z][0-9A-Za-z_]*)").unwrap());
-    if name.as_str().ends_with(".md") {
-        let s = String::from_utf8(read(root.file(name)).unwrap()).unwrap();
+    if path.extension().is_some_and(|s| s == "md") {
+        let s = String::from_utf8(read(path).unwrap()).unwrap();
         Either::Left(
             RE.find_iter(&s)
                 .map(|m| m.as_str().to_owned())
@@ -101,8 +109,8 @@ fn hashtag_tags(root: &Root, name: &NameRef) -> impl Iterator<Item = String> {
     }
 }
 
-fn legacy_tags(root: &Root, name: &NameRef) -> impl Iterator<Item = String> {
-    tags_from_dir(root.metadata().join("legacy").join(name.as_path()))
+fn legacy_tags(root: &Root, path: &Path) -> impl Iterator<Item = String> {
+    tags_from_dir(root.metadata().join("legacy").join(path))
 }
 
 fn with_implied_tags(

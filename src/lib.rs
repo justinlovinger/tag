@@ -1,19 +1,15 @@
 mod ext;
-mod fs;
-mod name;
 mod organize;
 mod root;
 mod tag;
 mod tagged_filesystem;
 mod tagged_path;
-mod tags_script;
 
 #[cfg(test)]
 mod testing;
 
 pub use crate::{
     ext::{Ext, ExtRef},
-    name::{Name, NameRef},
     organize::{combine, sort_tags_by_subfrequency},
     root::Root,
     tag::{Tag, TagRef},
@@ -22,8 +18,6 @@ pub use crate::{
 };
 
 pub const METADATA_DIR: &str = ".tag";
-pub const FILES_DIR: &str = "files";
-pub const TAGS_SCRIPT: &str = "tags.sh";
 
 pub const INLINE_SEPARATOR: char = '-';
 pub const DIR_SEPARATOR: char = '/';

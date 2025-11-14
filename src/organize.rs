@@ -6,8 +6,8 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::{
-    tagged_filesystem::MoveOp, ExtRef, Tag, TagRef, TaggedPath, DIR_SEPARATOR, EXT_SEPARATOR,
-    INLINE_SEPARATOR, PATH_PART_MAX_LEN, TAG_IGNORE,
+    ExtRef, Tag, TagRef, TaggedPath, DIR_SEPARATOR, EXT_SEPARATOR, INLINE_SEPARATOR,
+    PATH_PART_MAX_LEN, TAG_IGNORE,
 };
 
 use self::partition::{Partition, TagsPaths};
@@ -60,18 +60,6 @@ pub fn combine(paths: &[TaggedPath]) -> impl Iterator<Item = PathBuf> + '_ {
     );
     res.sort_by_key(|(i, (_, _))| *i);
     res.into_iter().map(|(_, (_, path))| path)
-}
-
-pub(crate) fn organize(paths: &[TaggedPath]) -> Vec<MoveOp> {
-    combine_(sort_tags_by_subfrequency_(paths))
-        .into_iter()
-        .filter_map(|(_, (path, to))| {
-            (path.as_path() != to).then(|| MoveOp {
-                from: path.as_path().to_owned(),
-                to,
-            })
-        })
-        .collect()
 }
 
 type SortedTags<'a> = Vec<(usize, (&'a TaggedPath, Vec<Intern<Tag>>))>;

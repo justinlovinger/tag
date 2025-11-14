@@ -21,7 +21,7 @@ impl TaggedFilesystem {
 mod tests {
     use crate::{
         tagged_filesystem::testing::tagged_filesystem_with,
-        testing::{name, tag, with_temp_dir},
+        testing::{tag, with_temp_dir},
     };
 
     use super::*;
@@ -29,8 +29,7 @@ mod tests {
     #[test]
     fn find_returns_paths_with_tag() {
         with_temp_dir(|dir| {
-            let filesystem =
-                tagged_filesystem_with(dir, [("foo.x", name("1.x")), ("bar.x", name("2.x"))]);
+            let filesystem = tagged_filesystem_with(dir, ["foo.x", "bar.x"]);
             assert_eq!(
                 filesystem
                     .find(vec![tag("foo")], vec![])
@@ -44,11 +43,10 @@ mod tests {
     #[test]
     fn find_returns_paths_with_all_tags() {
         with_temp_dir(|dir| {
-            let filesystem =
-                tagged_filesystem_with(dir, [("foo/bar.x", name("1.x")), ("foo.x", name("2.x"))]);
+            let filesystem = tagged_filesystem_with(dir, ["foo/bar.x", "foo.x"]);
             assert_eq!(
                 filesystem
-                    .find(vec![tag("foo"), tag("bar")], vec![],)
+                    .find(vec![tag("foo"), tag("bar")], vec![])
                     .unwrap()
                     .collect_vec(),
                 [TaggedPath::new("foo/bar.x").unwrap()]
@@ -59,8 +57,7 @@ mod tests {
     #[test]
     fn find_does_not_return_paths_with_excluded_tags() {
         with_temp_dir(|dir| {
-            let filesystem =
-                tagged_filesystem_with(dir, [("foo/bar.x", name("1.x")), ("foo/_.x", name("2.x"))]);
+            let filesystem = tagged_filesystem_with(dir, ["foo/bar.x", "foo/_.x"]);
             assert_eq!(
                 filesystem
                     .find(vec![tag("foo"),], vec![tag("bar")],)

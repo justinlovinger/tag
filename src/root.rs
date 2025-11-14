@@ -1,13 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use crate::{NameRef, TaggedPath, FILES_DIR, METADATA_DIR, TAGS_SCRIPT};
+use crate::{TaggedPath, METADATA_DIR};
 
 #[derive(Debug, Clone)]
 pub struct Root {
     path: PathBuf,
     metadata: PathBuf,
-    files: PathBuf,
-    tags: PathBuf,
 }
 
 impl Root {
@@ -18,15 +16,8 @@ impl Root {
         let path = path.into();
 
         let metadata = path.join(METADATA_DIR);
-        let files = metadata.join(FILES_DIR);
-        let tags = metadata.join(TAGS_SCRIPT);
-        if metadata.is_dir() && files.is_dir() && tags.is_file() {
-            Ok(Some(Self {
-                path,
-                metadata,
-                files,
-                tags,
-            }))
+        if metadata.is_dir() {
+            Ok(Some(Self { path, metadata }))
         } else {
             Ok(None)
         }
@@ -44,9 +35,7 @@ impl Root {
                     .map_while(|path| path.strip_prefix(root.as_path()).ok())
                     .take_while(|path| path != &PathBuf::new().as_path())
                 {
-                    if path.parent().is_some_and(|parent| {
-                        parent.ends_with(PathBuf::from(METADATA_DIR).join(FILES_DIR))
-                    }) {
+                    if path == PathBuf::from(METADATA_DIR) {
                         return Ok(None);
                     }
                     if TaggedPath::from_path(path.to_owned()).is_ok() {
@@ -78,25 +67,144 @@ impl Root {
     pub fn metadata(&self) -> &Path {
         &self.metadata
     }
-
-    pub fn files(&self) -> &Path {
-        &self.files
-    }
-
-    pub fn tags(&self) -> &Path {
-        &self.tags
-    }
-
-    pub fn file<N>(&self, name: N) -> PathBuf
-    where
-        N: AsRef<NameRef>,
-    {
-        self.files.join(name.as_ref().as_path())
-    }
 }
 
 impl AsRef<Path> for Root {
     fn as_ref(&self) -> &Path {
         self.as_path()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs::create_dir;
+
+    use crate::testing::with_temp_dir;
+
+    use super::*;
+
+    #[test]
+    fn new_returns_some_on_root() {
+        with_temp_dir(|dir| {
+            create_dir(dir.join(METADATA_DIR)).unwrap();
+            assert!(Root::new(dir).unwrap().is_some());
+        })
+    }
+
+    #[test]
+    fn new_returns_none_on_empty() {
+        with_temp_dir(|dir| {
+            assert!(Root::new(dir).unwrap().is_none());
+        })
+    }
+
+    #[test]
+    fn new_returns_none_on_child_of_root() {
+        with_temp_dir(|dir| {
+            create_dir(dir.join(METADATA_DIR)).unwrap();
+            create_dir(dir.join("foo")).unwrap();
+            assert!(Root::new(dir.join("foo")).unwrap().is_none());
+        })
+    }
+
+    #[test]
+    fn from_child_returns_some_on_root() {
+        with_temp_dir(|dir| {
+            create_dir(dir.join(METADATA_DIR)).unwrap();
+            assert!(Root::from_child(dir).unwrap().is_some());
+        })
+    }
+
+    #[test]
+    fn from_child_returns_some_on_child_of_root() {
+        with_temp_dir(|dir| {
+            create_dir(dir.join(METADATA_DIR)).unwrap();
+            create_dir(dir.join("foo")).unwrap();
+            assert!(Root::from_child(dir.join("foo")).unwrap().is_some());
+        })
+    }
+
+    #[test]
+    fn from_child_returns_none_on_tagged_directory() {
+        with_temp_dir(|dir| {
+            create_dir(dir.join(METADATA_DIR)).unwrap();
+            create_dir(dir.join("foo.dir")).unwrap();
+            assert!(Root::from_child(dir.join("foo.dir")).unwrap().is_none());
+        })
+    }
+
+    #[test]
+    fn from_child_returns_none_on_child_of_tagged_directory() {
+        with_temp_dir(|dir| {
+            create_dir(dir.join(METADATA_DIR)).unwrap();
+            create_dir(dir.join("foo.dir")).unwrap();
+            create_dir(dir.join("foo.dir").join("bar")).unwrap();
+            assert!(Root::from_child(dir.join("foo.dir").join("bar"))
+                .unwrap()
+                .is_none());
+        })
+    }
+
+    #[test]
+    fn from_child_returns_some_on_root_in_tagged_directory() {
+        with_temp_dir(|dir| {
+            create_dir(dir.join(METADATA_DIR)).unwrap();
+            create_dir(dir.join("foo.dir")).unwrap();
+            create_dir(dir.join("foo.dir").join(METADATA_DIR)).unwrap();
+            assert!(Root::from_child(dir.join("foo.dir")).unwrap().is_some());
+        })
+    }
+
+    #[test]
+    fn from_child_returns_some_on_child_of_root_in_tagged_directory() {
+        with_temp_dir(|dir| {
+            create_dir(dir.join(METADATA_DIR)).unwrap();
+            create_dir(dir.join("foo.dir")).unwrap();
+            create_dir(dir.join("foo.dir").join(METADATA_DIR)).unwrap();
+            create_dir(dir.join("foo.dir").join("bar")).unwrap();
+            assert!(Root::from_child(dir.join("foo.dir").join("bar"))
+                .unwrap()
+                .is_some());
+        })
+    }
+
+    #[test]
+    fn from_child_returns_none_on_metadata_directory() {
+        with_temp_dir(|dir| {
+            create_dir(dir.join(METADATA_DIR)).unwrap();
+            assert!(Root::from_child(dir.join(METADATA_DIR)).unwrap().is_none());
+        })
+    }
+
+    #[test]
+    fn from_child_returns_none_on_child_of_metadata_directory() {
+        with_temp_dir(|dir| {
+            create_dir(dir.join(METADATA_DIR)).unwrap();
+            create_dir(dir.join(METADATA_DIR).join("foo")).unwrap();
+            assert!(Root::from_child(dir.join(METADATA_DIR).join("foo"))
+                .unwrap()
+                .is_none());
+        })
+    }
+
+    #[test]
+    fn from_child_returns_none_on_root_in_metadata_directory() {
+        with_temp_dir(|dir| {
+            create_dir(dir.join(METADATA_DIR)).unwrap();
+            create_dir(dir.join(METADATA_DIR).join(METADATA_DIR)).unwrap();
+            assert!(Root::from_child(dir.join(METADATA_DIR)).unwrap().is_some());
+        })
+    }
+
+    #[test]
+    fn from_child_returns_none_on_child_of_root_in_metadata_directory() {
+        with_temp_dir(|dir| {
+            create_dir(dir.join(METADATA_DIR)).unwrap();
+            create_dir(dir.join(METADATA_DIR).join(METADATA_DIR)).unwrap();
+            create_dir(dir.join(METADATA_DIR).join("foo")).unwrap();
+            assert!(Root::from_child(dir.join(METADATA_DIR).join("foo"))
+                .unwrap()
+                .is_some());
+        })
     }
 }
