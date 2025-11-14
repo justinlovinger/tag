@@ -2,7 +2,7 @@
 
 Note: this utility is in the middle of a major rewrite,
 including breaking changes to syntax.
-See `pre-metadata` for the old and stable version.
+See `0.0.0` for the old and stable version.
 
 # Tag
 
