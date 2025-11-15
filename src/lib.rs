@@ -1,7 +1,8 @@
+mod combine;
 mod ext;
 mod find;
-mod organize;
 mod root;
+mod sort;
 mod tag;
 mod tagged_path;
 
@@ -9,10 +10,11 @@ mod tagged_path;
 mod testing;
 
 pub use crate::{
+    combine::combine,
     ext::{Ext, ExtRef},
     find::find,
-    organize::{combine, sort_tags_by_subfrequency},
     root::Root,
+    sort::sort_tags_by_subfrequency,
     tag::{Tag, TagRef},
     tagged_path::TaggedPath,
 };
