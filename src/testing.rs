@@ -121,7 +121,7 @@ mod tagged_path {
 
     use proptest::{
         prelude::{prop::collection::vec, *},
-        sample::subsequence,
+        sample::select,
     };
 
     use crate::{Ext, Tag, TaggedPath, EXT_SEPARATOR, TAG_IGNORE};
@@ -200,10 +200,7 @@ mod tagged_path {
 
         fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
             (
-                // Note,
-                // `subsequence` puts tags in the order defined in `TAGS`,
-                // which could leave gaps in our testing.
-                subsequence(TAGS, params.min_tags..=params.max_tags)
+                vec(select(TAGS), params.min_tags..=params.max_tags)
                     .prop_map(|tags| tags.into_iter().map(|x| Tag::new(x).unwrap()).collect_vec())
                     .prop_flat_map(|tags| {
                         (

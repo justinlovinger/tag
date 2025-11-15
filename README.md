@@ -25,7 +25,6 @@ are equivalent.
 Extensions can contain `.`.
 For example,
 `foo.tar.gz` has the extension `tar.gz`.
-Tagged paths cannot have the same tag more than once.
 
 Metadata may be stored in `.tag/`.
 A directory containing `.tag/` is the root of a tagged filesystem.

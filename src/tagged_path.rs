@@ -6,14 +6,13 @@ use std::{
 };
 
 use itertools::Itertools;
-use rustc_hash::FxHashSet;
 
 use crate::{
     ExtRef, TagRef, DIR_SEPARATOR, EXT_SEPARATOR, INLINE_SEPARATOR, SEPARATORS, TAG_IGNORE,
 };
 
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
-#[error("`{0}` is not a tagged path: tagged paths must contain zero or more unique tags ended by `{INLINE_SEPARATOR}`, `{DIR_SEPARATOR}`, or `{EXT_SEPARATOR}` with the tagging portion ended by `{EXT_SEPARATOR}`")]
+#[error("`{0}` is not a tagged path: tagged paths must contain zero or more tags ended by `{INLINE_SEPARATOR}`, `{DIR_SEPARATOR}`, or `{EXT_SEPARATOR}` with the tagging portion ended by the first `{EXT_SEPARATOR}`")]
 pub struct TaggedPathError(String);
 
 impl TaggedPathError {
@@ -116,7 +115,7 @@ impl TaggedPath {
                         ext: SliceIndices(i + c.len_utf8(), path.len()),
                         path,
                     };
-                    return if this.tags_unique() && this.ext_valid() {
+                    return if this.ext_valid() {
                         Ok(this)
                     } else {
                         Err(TaggedPathError(this.path))
@@ -143,7 +142,7 @@ impl TaggedPath {
         )
     }
 
-    pub fn from_tags<T, E>(tags: &FxHashSet<T>, ext: E) -> TaggedPath
+    pub fn from_tags<T, E>(tags: &[T], ext: E) -> TaggedPath
     where
         T: AsRef<TagRef>,
         E: AsRef<ExtRef>,
@@ -175,23 +174,6 @@ impl TaggedPath {
             tags: tag_indices,
             ext,
         }
-    }
-
-    fn tags_unique(&self) -> bool {
-        // A nested loop is faster than a hash-set
-        // on small lists.
-        for (i, tag) in self
-            .tags()
-            .take(self.tags_len().saturating_sub(1))
-            .enumerate()
-        {
-            for other_tag in self.tags().skip(i + 1) {
-                if tag == other_tag {
-                    return false;
-                }
-            }
-        }
-        true
     }
 
     fn ext_valid(&self) -> bool {
@@ -281,8 +263,6 @@ impl AsRef<str> for TaggedPath {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use once_cell::sync::Lazy;
     use proptest::prelude::*;
     use test_strategy::proptest;
@@ -325,11 +305,11 @@ mod tests {
     }
 
     #[test]
-    fn new_returns_err_if_there_are_duplicate_tags() {
-        assert!(TaggedPath::new("foo-foo.baz").is_err());
-        assert!(TaggedPath::new("foo/foo.baz").is_err());
-        assert!(TaggedPath::new("foo-bar/foo.baz").is_err());
-        assert!(TaggedPath::new("bar/foo-foo.baz").is_err());
+    fn new_allows_duplicate_tags() {
+        assert!(TaggedPath::new("foo-foo.baz").is_ok());
+        assert!(TaggedPath::new("foo/foo.baz").is_ok());
+        assert!(TaggedPath::new("foo-bar/foo.baz").is_ok());
+        assert!(TaggedPath::new("bar/foo-foo.baz").is_ok());
     }
 
     #[test]
@@ -342,14 +322,14 @@ mod tests {
     #[test]
     fn from_tags_adds_ignored_tag_if_no_tags() {
         assert_eq!(
-            TaggedPath::from_tags::<Tag, _>(&FxHashSet::default(), ext("x")).to_string(),
+            TaggedPath::from_tags::<Tag, _>(&[], ext("x")).to_string(),
             "_.x"
         );
     }
 
     #[proptest]
-    fn from_tags_matches_new(tags: HashSet<Tag>, ext: Ext) {
-        let path = TaggedPath::from_tags(&tags.into_iter().collect(), ext);
+    fn from_tags_matches_new(tags: Vec<Tag>, ext: Ext) {
+        let path = TaggedPath::from_tags(&tags, ext);
         prop_assert_eq!(TaggedPath::from_path(path.as_path()).unwrap(), path);
     }
 

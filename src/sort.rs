@@ -60,7 +60,9 @@ fn sort_tags_by_subfrequency_(paths: &[TaggedPath]) -> SortedTags<'_> {
                 paths
                     .finalize()
                     .map(|(i, path, mut inline_tags)| {
-                        // Unstable sort is fine because every tag should be unique.
+                        // Unstable sort is fine
+                        // because the comparison function only returns items equal
+                        // when actually equal.
                         inline_tags.sort_unstable_by(|tag, other| {
                             tag.len()
                                 .cmp(&other.len())
