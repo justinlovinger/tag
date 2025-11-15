@@ -6,7 +6,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use tag::{Tag, TaggedFilesystemBuilder};
+use tag::{find, Tag};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -45,11 +45,10 @@ fn main() -> anyhow::Result<()> {
         std::env::set_current_dir(path)?;
     }
 
-    let filesystem = TaggedFilesystemBuilder::new(current_dir()?)
-        .build()?
-        .expect("The working directory is not tagged. Please run `tag init` to initialize.");
     match args.command {
-        Some(Commands::Find { include, exclude }) => print(filesystem.find(include, exclude)?)?,
+        Some(Commands::Find { include, exclude }) => {
+            print(find(current_dir()?, include, exclude)?)?
+        }
         None => {}
     }
 

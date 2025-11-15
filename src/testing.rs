@@ -22,6 +22,16 @@ mod fs {
         res
     }
 
+    pub fn create_files_relative_to<P, Q>(dir: P, paths: impl IntoIterator<Item = Q>)
+    where
+        P: AsRef<Path>,
+        Q: AsRef<Path>,
+    {
+        for path in paths.into_iter() {
+            create_file_and_parent(dir.as_ref().join(&path));
+        }
+    }
+
     pub fn create_file_and_parent<P>(path: P)
     where
         P: AsRef<Path>,

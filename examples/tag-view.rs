@@ -16,8 +16,8 @@ use itertools::{Either, Itertools};
 use regex::Regex;
 use rustc_hash::FxHashSet;
 use tag::{
-    combine, sort_tags_by_subfrequency, Root, TaggedFilesystemBuilder, TaggedPath, DIR_SEPARATOR,
-    EXT_SEPARATOR, INLINE_SEPARATOR,
+    combine, find, sort_tags_by_subfrequency, Root, TaggedPath, DIR_SEPARATOR, EXT_SEPARATOR,
+    INLINE_SEPARATOR,
 };
 
 #[derive(Parser)]
@@ -29,14 +29,11 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    let root = Root::new(current_dir().unwrap()).unwrap().unwrap();
+    let cwd = current_dir().unwrap();
+    let root = Root::new(&cwd).unwrap().unwrap();
 
     let paths = if args.paths.is_empty() {
-        TaggedFilesystemBuilder::new(current_dir().unwrap())
-            .build()
-            .unwrap()
-            .unwrap()
-            .find(Vec::new(), Vec::new())
+        find(cwd, Vec::new(), Vec::new())
             .unwrap()
             .map(|path| path.into_path())
             .collect()

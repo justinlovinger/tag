@@ -1,8 +1,8 @@
 mod ext;
+mod find;
 mod organize;
 mod root;
 mod tag;
-mod tagged_filesystem;
 mod tagged_path;
 
 #[cfg(test)]
@@ -10,10 +10,10 @@ mod testing;
 
 pub use crate::{
     ext::{Ext, ExtRef},
+    find::find,
     organize::{combine, sort_tags_by_subfrequency},
     root::Root,
     tag::{Tag, TagRef},
-    tagged_filesystem::{TaggedFilesystem, TaggedFilesystemBuilder},
     tagged_path::TaggedPath,
 };
 
