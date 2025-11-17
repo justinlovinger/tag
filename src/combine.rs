@@ -14,7 +14,7 @@ pub fn combine(paths: &[TaggedPath]) -> impl Iterator<Item = PathBuf> + '_ {
         paths
             .iter()
             .map(|path| {
-                let tags = path.tags().map(|tag| tag.to_owned()).collect();
+                let tags = path.tags().collect();
                 (path, tags)
             })
             .enumerate()
