@@ -17,7 +17,7 @@ use regex::Regex;
 use rustc_hash::FxHashSet;
 use tag::{
     combine, find, sort_tags_by_subfrequency, Root, TaggedPath, DIR_SEPARATOR, EXT_SEPARATOR,
-    INLINE_SEPARATOR,
+    INLINE_SEPARATOR, TAG_IGNORE,
 };
 
 #[derive(Parser)]
@@ -86,7 +86,10 @@ fn path_tags(path: &Path) -> impl Iterator<Item = &str> {
         .unwrap()
         .split_once(EXT_SEPARATOR)
         .map_or(Either::Right(empty()), |x| {
-            Either::Left(x.0.split([INLINE_SEPARATOR, DIR_SEPARATOR]))
+            Either::Left(
+                x.0.split([INLINE_SEPARATOR, DIR_SEPARATOR])
+                    .filter(|tag| !tag.is_empty() && !tag.starts_with(TAG_IGNORE)),
+            )
         })
 }
 

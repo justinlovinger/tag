@@ -129,7 +129,7 @@ mod partition {
         pub fn new(paths: &'a [TaggedPath]) -> Self {
             let (paths_tags, done_paths): (PathsTags, _) =
                 paths.iter().enumerate().partition_map(|(i, path)| {
-                    if path.tags_is_empty() {
+                    if path.tags().next().is_none() {
                         Either::Right((i, SmallVec::new()))
                     } else {
                         Either::Left((

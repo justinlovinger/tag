@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use itertools::Itertools;
+use rustc_hash::FxHashSet;
 
 use crate::{Tag, TaggedPath, METADATA_DIR};
 
@@ -12,20 +12,30 @@ pub fn find<P>(
 where
     P: AsRef<Path>,
 {
-    Ok(filtered_tagged_paths(dir, move |path| {
-        include
-            .iter()
-            .all(|tag| path.tags().contains(&tag.as_ref()))
-            && !exclude
-                .iter()
-                .any(|tag| path.tags().contains(&tag.as_ref()))
-    }))
+    Ok(if include.is_empty() && exclude.is_empty() {
+        tagged_paths(dir)
+    } else {
+        filtered_tagged_paths(dir, move |path| {
+            let tags = path.tags().collect::<FxHashSet<_>>();
+            include.iter().all(|tag| tags.contains(&tag.as_ref()))
+                && !exclude.iter().any(|tag| tags.contains(&tag.as_ref()))
+        })
+    })
+}
+
+fn tagged_paths<P>(dir: P) -> crossbeam_channel::IntoIter<TaggedPath>
+where
+    P: AsRef<Path>,
+{
+    let (sender, receiver) = crossbeam_channel::unbounded();
+    for_each_tagged_path(dir, move |path| sender.send(path).unwrap());
+    receiver.into_iter()
 }
 
 fn filtered_tagged_paths<P>(
     dir: P,
     predicate: impl Fn(&TaggedPath) -> bool + Send + Sync + 'static,
-) -> impl Iterator<Item = TaggedPath>
+) -> crossbeam_channel::IntoIter<TaggedPath>
 where
     P: AsRef<Path>,
 {
@@ -120,7 +130,9 @@ mod tests {
         with_temp_dir(|dir| {
             create_files_relative_to(dir, ["foo.x", "bar.x"]);
             assert_eq!(
-                find(dir, vec![tag("foo")], vec![]).unwrap().collect_vec(),
+                find(dir, vec![tag("foo")], vec![])
+                    .unwrap()
+                    .collect::<Vec<_>>(),
                 [TaggedPath::new("foo.x").unwrap()]
             );
         })
@@ -133,7 +145,7 @@ mod tests {
             assert_eq!(
                 find(dir, vec![tag("foo"), tag("bar")], vec![])
                     .unwrap()
-                    .collect_vec(),
+                    .collect::<Vec<_>>(),
                 [TaggedPath::new("foo/bar.x").unwrap()]
             );
         })
@@ -146,7 +158,7 @@ mod tests {
             assert_eq!(
                 find(dir, vec![tag("foo")], vec![tag("bar")],)
                     .unwrap()
-                    .collect_vec(),
+                    .collect::<Vec<_>>(),
                 [TaggedPath::new("foo/_.x").unwrap()]
             );
         })
@@ -157,7 +169,9 @@ mod tests {
         with_temp_dir(|dir| {
             create_files_relative_to(dir, ["foo.x", "bar.x", ".tag/foo.x"]);
             assert_eq!(
-                find(dir, vec![tag("foo")], vec![]).unwrap().collect_vec(),
+                find(dir, vec![tag("foo")], vec![])
+                    .unwrap()
+                    .collect::<Vec<_>>(),
                 [TaggedPath::new("foo.x").unwrap()]
             );
         })
