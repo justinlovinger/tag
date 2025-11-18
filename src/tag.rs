@@ -47,7 +47,7 @@ impl FromStr for Tag {
 
 impl TagRef {
     #[ref_cast_custom]
-    pub(crate) const fn new(s: &str) -> &Self;
+    pub(crate) const unsafe fn new_unchecked(s: &str) -> &Self;
 
     pub fn as_path(&self) -> &Path {
         self.0.as_ref()
@@ -108,7 +108,8 @@ impl AsRef<TagRef> for Tag {
 
 impl Borrow<TagRef> for Tag {
     fn borrow(&self) -> &TagRef {
-        TagRef::new(self.0.as_str())
+        // SAFETY: if `Tag` is valid, so is `TagRef`.
+        unsafe { TagRef::new_unchecked(self.0.as_str()) }
     }
 }
 

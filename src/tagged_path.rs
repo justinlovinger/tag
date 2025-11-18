@@ -123,7 +123,8 @@ impl TaggedPath {
         self.tags_str()
             .split([INLINE_SEPARATOR, DIR_SEPARATOR])
             .filter(|s| !s.is_empty() && !s.starts_with(TAG_IGNORE))
-            .map(TagRef::new)
+            // SAFETY: invalid tags are filtered above.
+            .map(|s| unsafe { TagRef::new_unchecked(s) })
     }
 
     // If this is made public,
@@ -144,11 +145,14 @@ impl TaggedPath {
     }
 
     pub fn ext(&self) -> &ExtRef {
-        // SAFETY: `self.ext` is from a checked method and is known to be `EXT_SEPARATOR`.
-        ExtRef::new(unsafe {
+        // SAFETY: `self.ext` is a valid index from a string method
+        // and is known to be `EXT_SEPARATOR`.
+        let s = unsafe {
             self.path
                 .get_unchecked((self.ext + EXT_SEPARATOR.len_utf8())..self.path.len())
-        })
+        };
+        // SAFETY: extension is validated when `Self` is validated.
+        unsafe { ExtRef::new_unchecked(s) }
     }
 
     pub fn as_path(&self) -> &Path {

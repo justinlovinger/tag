@@ -48,7 +48,7 @@ impl FromStr for Ext {
 
 impl ExtRef {
     #[ref_cast_custom]
-    pub(crate) const fn new(s: &str) -> &Self;
+    pub(crate) const unsafe fn new_unchecked(s: &str) -> &Self;
 
     pub fn as_path(&self) -> &Path {
         self.0.as_ref()
@@ -83,7 +83,8 @@ impl AsRef<ExtRef> for Ext {
 
 impl Borrow<ExtRef> for Ext {
     fn borrow(&self) -> &ExtRef {
-        ExtRef::new(self.0.as_str())
+        // SAFETY: if `Ext` is valid, so is `ExtRef`.
+        unsafe { ExtRef::new_unchecked(self.0.as_str()) }
     }
 }
 
