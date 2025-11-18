@@ -1,10 +1,10 @@
 use std::{
-    fmt,
     hash::Hash,
     path::{Path, PathBuf},
     str::FromStr,
 };
 
+use derive_more::Display;
 use itertools::Itertools;
 
 use crate::{ExtRef, TagRef, DIR_SEPARATOR, EXT_SEPARATOR, INLINE_SEPARATOR, TAG_IGNORE};
@@ -23,46 +23,8 @@ impl TaggedPathError {
     }
 }
 
-#[derive(Clone)]
-pub struct TaggedPath {
-    path: String,
-    /// Index of first `EXT_SEPARATOR`.
-    ext: usize,
-}
-
-impl fmt::Debug for TaggedPath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.path.fmt(f)
-    }
-}
-
-impl fmt::Display for TaggedPath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.path.fmt(f)
-    }
-}
-
-impl Eq for TaggedPath {}
-impl PartialEq for TaggedPath {
-    fn eq(&self, other: &Self) -> bool {
-        self.path.eq(&other.path)
-    }
-}
-impl Ord for TaggedPath {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.path.cmp(&other.path)
-    }
-}
-impl PartialOrd for TaggedPath {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Hash for TaggedPath {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.path.hash(state)
-    }
-}
+#[derive(Clone, Debug, Display, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TaggedPath(String);
 
 impl TaggedPath {
     pub fn new<S>(path: S) -> Result<TaggedPath, TaggedPathError>
@@ -70,13 +32,12 @@ impl TaggedPath {
         S: Into<String>,
     {
         let path: String = path.into();
-        match path.find(EXT_SEPARATOR) {
-            Some(ext) => {
-                let this = Self { path, ext };
-                if this.ext().as_str().contains(DIR_SEPARATOR) {
-                    Err(TaggedPathError(this.path))
+        match path.split_once(EXT_SEPARATOR) {
+            Some((_, ext)) => {
+                if ext.contains(DIR_SEPARATOR) {
+                    Err(TaggedPathError(path))
                 } else {
-                    Ok(this)
+                    Ok(Self(path))
                 }
             }
             None => Err(TaggedPathError(path)),
@@ -101,21 +62,15 @@ impl TaggedPath {
         E: AsRef<ExtRef>,
     {
         if tags.is_empty() {
-            Self {
-                path: format!("{TAG_IGNORE}{EXT_SEPARATOR}{}", ext.as_ref()),
-                ext: TAG_IGNORE.len_utf8(),
-            }
+            Self(format!("{TAG_IGNORE}{EXT_SEPARATOR}{}", ext.as_ref()))
         } else {
             let inline_separator = INLINE_SEPARATOR.to_string();
-            let tags_str = tags
-                .iter()
-                .format_with(&inline_separator, |tag, f| f(&tag.as_ref()))
-                .to_string();
-            let ext_index = tags_str.len();
-            Self {
-                path: format!("{tags_str}{EXT_SEPARATOR}{}", ext.as_ref()),
-                ext: ext_index,
-            }
+            Self(format!(
+                "{}{EXT_SEPARATOR}{}",
+                tags.iter()
+                    .format_with(&inline_separator, |tag, f| f(&tag.as_ref())),
+                ext.as_ref()
+            ))
         }
     }
 
@@ -140,27 +95,28 @@ impl TaggedPath {
     }
 
     fn tags_str(&self) -> &str {
-        // SAFETY: `self.ext` is from a checked method.
-        unsafe { self.path.get_unchecked(0..self.ext) }
+        self.0
+            .split_once(EXT_SEPARATOR)
+            .expect("should have EXT_SEPARATOR")
+            .0
     }
 
     pub fn ext(&self) -> &ExtRef {
-        // SAFETY: `self.ext` is a valid index from a string method
-        // and is known to be `EXT_SEPARATOR`.
-        let s = unsafe {
-            self.path
-                .get_unchecked((self.ext + EXT_SEPARATOR.len_utf8())..self.path.len())
-        };
+        let s = self
+            .0
+            .split_once(EXT_SEPARATOR)
+            .expect("should have EXT_SEPARATOR")
+            .1;
         // SAFETY: extension is validated when `Self` is validated.
         unsafe { ExtRef::new_unchecked(s) }
     }
 
     pub fn as_path(&self) -> &Path {
-        self.path.as_ref()
+        self.0.as_ref()
     }
 
     pub fn into_path(self) -> PathBuf {
-        self.path.into()
+        self.0.into()
     }
 }
 
@@ -174,19 +130,19 @@ impl FromStr for TaggedPath {
 
 impl From<TaggedPath> for PathBuf {
     fn from(value: TaggedPath) -> Self {
-        value.path.into()
+        value.0.into()
     }
 }
 
 impl AsRef<Path> for TaggedPath {
     fn as_ref(&self) -> &Path {
-        self.path.as_ref()
+        self.0.as_ref()
     }
 }
 
 impl AsRef<str> for TaggedPath {
     fn as_ref(&self) -> &str {
-        self.path.as_ref()
+        self.0.as_ref()
     }
 }
 
