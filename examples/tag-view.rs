@@ -12,12 +12,11 @@ use std::{
 };
 
 use clap::Parser;
-use itertools::{Either, Itertools};
+use itertools::Either;
 use regex::Regex;
 use rustc_hash::FxHashSet;
 use tag::{
-    combine, find, sort_tags_by_subfrequency, Root, TaggedPath, DIR_SEPARATOR, EXT_SEPARATOR,
-    INLINE_SEPARATOR, TAG_IGNORE,
+    combine, find, sort_tags_by_subfrequency, ExtRef, Root, Tag, TagRef, TaggedPath, TaggedPathRef,
 };
 
 #[derive(Parser)]
@@ -43,10 +42,7 @@ fn main() {
 
     let tags = paths.iter().map(|path| tags(&root, path));
     let exts = paths.iter().map(|path| {
-        path.to_str()
-            .unwrap()
-            .split_once(EXT_SEPARATOR)
-            .map_or("", |x| x.1)
+        TaggedPathRef::new(path.to_str().unwrap()).map_or(ExtRef::empty(), |x| x.ext())
     });
 
     let targets = paths.iter().map(|path| path.canonicalize().unwrap());
@@ -58,8 +54,7 @@ fn main() {
     .unwrap();
     let links = tags
         .zip(exts)
-        .map(|(mut tags, ext)| format!("{}{EXT_SEPARATOR}{ext}", tags.join("-")))
-        .map(|path| TaggedPath::new(path).unwrap())
+        .map(|(tags, ext)| TaggedPath::from_tags(&tags.collect::<Vec<_>>(), ext))
         .collect::<Vec<_>>();
     let links = sort_tags_by_subfrequency(&links).collect::<Vec<_>>();
     let links = combine(&links).map(|path| tmp.join(path));
@@ -71,7 +66,7 @@ fn main() {
     println!("{}", tmp.display());
 }
 
-fn tags<'a>(root: &'a Root, path: &'a Path) -> impl Iterator<Item = String> + 'a {
+fn tags<'a>(root: &'a Root, path: &'a Path) -> impl Iterator<Item = Tag> + 'a {
     with_implied_tags(
         root,
         path_tags(path)
@@ -81,26 +76,19 @@ fn tags<'a>(root: &'a Root, path: &'a Path) -> impl Iterator<Item = String> + 'a
     )
 }
 
-fn path_tags(path: &Path) -> impl Iterator<Item = &str> {
-    path.to_str()
-        .unwrap()
-        .split_once(EXT_SEPARATOR)
-        .map_or(Either::Right(empty()), |x| {
-            Either::Left(
-                x.0.split([INLINE_SEPARATOR, DIR_SEPARATOR])
-                    .filter(|tag| !tag.is_empty() && !tag.starts_with(TAG_IGNORE)),
-            )
-        })
+fn path_tags(path: &Path) -> impl Iterator<Item = &TagRef> {
+    TaggedPathRef::new(path.to_str().unwrap())
+        .map_or(Either::Right(empty()), |x| Either::Left(x.tags()))
 }
 
-fn hashtag_tags(path: &Path) -> impl Iterator<Item = String> {
+fn hashtag_tags(path: &Path) -> impl Iterator<Item = Tag> {
     static RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?:^| )#([0-9A-Za-z][0-9A-Za-z_]*)").unwrap());
     if path.extension().is_some_and(|s| s == "md") {
         let s = String::from_utf8(read(path).unwrap()).unwrap();
         Either::Left(
             RE.find_iter(&s)
-                .map(|m| m.as_str().to_owned())
+                .map(|m| Tag::new(m.as_str()).unwrap())
                 .collect::<Vec<_>>()
                 .into_iter(),
         )
@@ -109,20 +97,20 @@ fn hashtag_tags(path: &Path) -> impl Iterator<Item = String> {
     }
 }
 
-fn legacy_tags(root: &Root, path: &Path) -> impl Iterator<Item = String> {
+fn legacy_tags(root: &Root, path: &Path) -> impl Iterator<Item = Tag> {
     tags_from_dir(root.metadata().join("legacy").join(path))
 }
 
 fn with_implied_tags(
     root: &Root,
-    tags: impl IntoIterator<Item = String>,
-) -> impl Iterator<Item = String> {
+    tags: impl IntoIterator<Item = Tag>,
+) -> impl Iterator<Item = Tag> {
     let mut new_tags = tags.into_iter().collect::<FxHashSet<_>>();
     let mut tags = FxHashSet::default();
     while !new_tags.is_empty() {
         let newest_tags = new_tags
             .iter()
-            .flat_map(|tag| tags_from_dir(root.metadata().join("implied").join(tag)))
+            .flat_map(|tag| tags_from_dir(root.metadata().join("implied").join(tag.as_path())))
             .collect::<FxHashSet<_>>();
         tags.extend(mem::take(&mut new_tags));
         new_tags = newest_tags
@@ -133,20 +121,16 @@ fn with_implied_tags(
     tags.into_iter()
 }
 
-fn tags_from_dir<P>(path: P) -> impl Iterator<Item = String>
+fn tags_from_dir<P>(path: P) -> impl Iterator<Item = Tag>
 where
     P: AsRef<Path>,
 {
     match read_dir(path) {
-        Ok(dir) => Either::Left(dir.into_iter().map(|x| {
-            x.unwrap()
-                .path()
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .to_owned()
-        })),
+        Ok(dir) => {
+            Either::Left(dir.into_iter().map(|x| {
+                Tag::new(x.unwrap().path().file_name().unwrap().to_str().unwrap()).unwrap()
+            }))
+        }
         Err(e) => match e.kind() {
             std::io::ErrorKind::NotFound => Either::Right(empty()),
             _ => panic!("{e}"),

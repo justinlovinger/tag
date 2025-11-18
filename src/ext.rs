@@ -50,6 +50,11 @@ impl ExtRef {
     #[ref_cast_custom]
     pub(crate) const unsafe fn new_unchecked(s: &str) -> &Self;
 
+    pub fn empty() -> &'static Self {
+        // SAFETY: empty extensions are allowed.
+        unsafe { Self::new_unchecked("") }
+    }
+
     pub fn as_path(&self) -> &Path {
         self.0.as_ref()
     }
