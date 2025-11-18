@@ -16,7 +16,7 @@ pub use crate::{
     root::Root,
     sort::sort_tags_by_subfrequency,
     tag::{Tag, TagRef},
-    tagged_path::TaggedPath,
+    tagged_path::{TaggedPath, TaggedPathRef},
 };
 
 pub const METADATA_DIR: &str = ".tag";

@@ -108,7 +108,7 @@ impl AsRef<TagRef> for Tag {
 
 impl Borrow<TagRef> for Tag {
     fn borrow(&self) -> &TagRef {
-        // SAFETY: if `Tag` is valid, so is `TagRef`.
+        // SAFETY: `TagRef` is valid if `Tag` is.
         unsafe { TagRef::new_unchecked(self.0.as_str()) }
     }
 }

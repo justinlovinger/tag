@@ -83,7 +83,7 @@ impl AsRef<ExtRef> for Ext {
 
 impl Borrow<ExtRef> for Ext {
     fn borrow(&self) -> &ExtRef {
-        // SAFETY: if `Ext` is valid, so is `ExtRef`.
+        // SAFETY: `ExtRef` is valid if `Ext` is.
         unsafe { ExtRef::new_unchecked(self.0.as_str()) }
     }
 }

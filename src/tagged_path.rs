@@ -1,11 +1,15 @@
 use std::{
+    borrow::Borrow,
+    cmp::Ordering,
     hash::Hash,
+    ops::Deref,
     path::{Path, PathBuf},
     str::FromStr,
 };
 
 use derive_more::Display;
 use itertools::Itertools;
+use ref_cast::{ref_cast_custom, RefCastCustom};
 
 use crate::{ExtRef, TagRef, DIR_SEPARATOR, EXT_SEPARATOR, INLINE_SEPARATOR, TAG_IGNORE};
 
@@ -26,25 +30,131 @@ impl TaggedPathError {
 #[derive(Clone, Debug, Display, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TaggedPath(String);
 
+impl FromStr for TaggedPath {
+    type Err = TaggedPathError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::new(s)
+    }
+}
+
+impl From<TaggedPath> for PathBuf {
+    fn from(value: TaggedPath) -> Self {
+        value.0.into()
+    }
+}
+
+impl From<TaggedPath> for String {
+    fn from(value: TaggedPath) -> Self {
+        value.0
+    }
+}
+
+#[derive(Debug, Display, PartialEq, Eq, PartialOrd, Ord, Hash, RefCastCustom)]
+#[repr(transparent)]
+pub struct TaggedPathRef(str);
+
+impl TaggedPathRef {
+    #[ref_cast_custom]
+    const unsafe fn new_unchecked(s: &str) -> &Self;
+}
+
+impl<'a> From<&'a TaggedPathRef> for &'a Path {
+    fn from(value: &'a TaggedPathRef) -> Self {
+        value.0.as_ref()
+    }
+}
+
+impl<'a> From<&'a TaggedPathRef> for &'a str {
+    fn from(value: &'a TaggedPathRef) -> Self {
+        &value.0
+    }
+}
+
+impl PartialOrd<&TaggedPathRef> for TaggedPath {
+    fn partial_cmp(&self, other: &&TaggedPathRef) -> Option<Ordering> {
+        self.as_ref().partial_cmp(other)
+    }
+}
+
+impl PartialOrd<TaggedPath> for &TaggedPathRef {
+    fn partial_cmp(&self, other: &TaggedPath) -> Option<Ordering> {
+        self.partial_cmp(&other.as_ref())
+    }
+}
+
+impl PartialEq<&TaggedPathRef> for TaggedPath {
+    fn eq(&self, other: &&TaggedPathRef) -> bool {
+        self.as_ref().eq(other)
+    }
+}
+
+impl PartialEq<TaggedPath> for &TaggedPathRef {
+    fn eq(&self, other: &TaggedPath) -> bool {
+        self.eq(&other.as_ref())
+    }
+}
+
+impl Deref for TaggedPath {
+    type Target = TaggedPathRef;
+
+    fn deref(&self) -> &Self::Target {
+        self.borrow()
+    }
+}
+
+impl AsRef<TaggedPathRef> for TaggedPath {
+    fn as_ref(&self) -> &TaggedPathRef {
+        self.borrow()
+    }
+}
+
+impl Borrow<TaggedPathRef> for TaggedPath {
+    fn borrow(&self) -> &TaggedPathRef {
+        // SAFETY: `TaggedPathRef` is valid if `TaggedPath` is.
+        unsafe { TaggedPathRef::new_unchecked(self.0.as_str()) }
+    }
+}
+
+impl<'a> From<&'a TaggedPathRef> for TaggedPath {
+    fn from(value: &'a TaggedPathRef) -> Self {
+        value.to_owned()
+    }
+}
+
+impl AsRef<TaggedPathRef> for TaggedPathRef {
+    fn as_ref(&self) -> &TaggedPathRef {
+        self
+    }
+}
+
+impl ToOwned for TaggedPathRef {
+    type Owned = TaggedPath;
+
+    fn to_owned(&self) -> Self::Owned {
+        TaggedPath(self.0.to_owned())
+    }
+}
+
 impl TaggedPath {
-    pub fn new<S>(path: S) -> Result<TaggedPath, TaggedPathError>
+    pub fn new<S>(path: S) -> Result<Self, TaggedPathError>
     where
         S: Into<String>,
     {
         let path: String = path.into();
-        match path.split_once(EXT_SEPARATOR) {
-            Some((_, ext)) => {
-                if ext.contains(DIR_SEPARATOR) {
-                    Err(TaggedPathError(path))
-                } else {
-                    Ok(Self(path))
-                }
-            }
-            None => Err(TaggedPathError(path)),
+        if Self::is_valid(&path) {
+            Ok(Self(path))
+        } else {
+            Err(TaggedPathError(path))
         }
     }
 
-    pub fn from_path<P>(path: P) -> Result<TaggedPath, TaggedPathError>
+    fn is_valid(path: &str) -> bool {
+        path.split_once(EXT_SEPARATOR)
+            .is_some_and(|(_, ext)| !ext.contains(DIR_SEPARATOR))
+    }
+
+    pub fn from_path<P>(path: P) -> Result<Self, TaggedPathError>
     where
         P: Into<PathBuf>,
     {
@@ -71,6 +181,21 @@ impl TaggedPath {
                     .format_with(&inline_separator, |tag, f| f(&tag.as_ref())),
                 ext.as_ref()
             ))
+        }
+    }
+
+    pub fn into_path(self) -> PathBuf {
+        self.0.into()
+    }
+}
+
+impl TaggedPathRef {
+    pub fn new(path: &str) -> Result<&Self, TaggedPathError> {
+        if TaggedPath::is_valid(path) {
+            // SAFETY: validity was just checked above.
+            Ok(unsafe { Self::new_unchecked(path) })
+        } else {
+            Err(TaggedPathError(path.to_owned()))
         }
     }
 
@@ -111,37 +236,11 @@ impl TaggedPath {
         unsafe { ExtRef::new_unchecked(s) }
     }
 
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
     pub fn as_path(&self) -> &Path {
-        self.0.as_ref()
-    }
-
-    pub fn into_path(self) -> PathBuf {
-        self.0.into()
-    }
-}
-
-impl FromStr for TaggedPath {
-    type Err = TaggedPathError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::new(s)
-    }
-}
-
-impl From<TaggedPath> for PathBuf {
-    fn from(value: TaggedPath) -> Self {
-        value.0.into()
-    }
-}
-
-impl AsRef<Path> for TaggedPath {
-    fn as_ref(&self) -> &Path {
-        self.0.as_ref()
-    }
-}
-
-impl AsRef<str> for TaggedPath {
-    fn as_ref(&self) -> &str {
         self.0.as_ref()
     }
 }
@@ -216,6 +315,18 @@ mod tests {
     fn from_tags_matches_new(tags: Vec<Tag>, ext: Ext) {
         let path = TaggedPath::from_tags(&tags, ext);
         prop_assert_eq!(TaggedPath::from_path(path.as_path()).unwrap(), path);
+    }
+
+    #[proptest]
+    fn tagged_path_ref_new_matches_tagged_path_new(
+        #[strategy(MAYBE_TAGGED_PATH.as_str())] path: String,
+    ) {
+        match (TaggedPathRef::new(&path), TaggedPath::new(&path)) {
+            (Ok(x), Ok(y)) => prop_assert_eq!(x, y),
+            (Ok(_), Err(_)) => prop_assert!(false),
+            (Err(_), Ok(_)) => prop_assert!(false),
+            (Err(x), Err(y)) => prop_assert_eq!(x, y),
+        }
     }
 
     #[proptest]
