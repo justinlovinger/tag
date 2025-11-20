@@ -40,25 +40,27 @@ fn main() {
         args.paths
     };
 
+    let targets = paths.iter().map(|path| path.canonicalize().unwrap());
+
     let tags = paths.iter().map(|path| tags(&root, path));
     let exts = paths.iter().map(|path| {
         TaggedPathRef::new(path.to_str().unwrap()).map_or(ExtRef::empty(), |x| x.ext())
     });
+    let tagged_paths = tags
+        .zip(exts)
+        .map(|(tags, ext)| TaggedPath::from_tags(&tags.collect::<Vec<_>>(), ext))
+        .collect::<Vec<_>>();
 
-    let targets = paths.iter().map(|path| path.canonicalize().unwrap());
     let tmp = PathBuf::from_str(
         String::from_utf8(Command::new("mktemp").arg("-d").output().unwrap().stdout)
             .unwrap()
             .trim(),
     )
     .unwrap();
-    let links = tags
-        .zip(exts)
-        .map(|(tags, ext)| TaggedPath::from_tags(&tags.collect::<Vec<_>>(), ext))
-        .collect::<Vec<_>>();
-    let links = sort_tags_by_subfrequency(&links).collect::<Vec<_>>();
-    let links = combine(&links).map(|path| tmp.join(path));
-    for (target, link) in targets.zip(links) {
+    for (target, link) in targets.zip(
+        combine(&sort_tags_by_subfrequency(&tagged_paths).collect::<Vec<_>>())
+            .map(|path| tmp.join(path)),
+    ) {
         create_dir_all(link.parent().unwrap()).unwrap();
         symlink(target, link).unwrap();
     }
