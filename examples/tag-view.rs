@@ -48,7 +48,7 @@ fn main() {
     });
     let tagged_paths = tags
         .zip(exts)
-        .map(|(tags, ext)| TaggedPath::from_tags(&tags.collect::<Vec<_>>(), ext))
+        .map(|(tags, ext)| TaggedPath::from_tags(tags, ext))
         .collect::<Vec<_>>();
 
     let tmp = PathBuf::from_str(

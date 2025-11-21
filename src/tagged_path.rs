@@ -166,21 +166,24 @@ impl TaggedPath {
         )
     }
 
-    pub fn from_tags<T, E>(tags: &[T], ext: E) -> TaggedPath
+    pub fn from_tags<T, E>(tags: impl IntoIterator<Item = T>, ext: E) -> TaggedPath
     where
         T: AsRef<TagRef>,
         E: AsRef<ExtRef>,
     {
-        if tags.is_empty() {
-            Self(format!("{TAG_IGNORE}{EXT_SEPARATOR}{}", ext.as_ref()))
-        } else {
-            let inline_separator = INLINE_SEPARATOR.to_string();
-            Self(format!(
-                "{}{EXT_SEPARATOR}{}",
-                tags.iter()
-                    .format_with(&inline_separator, |tag, f| f(&tag.as_ref())),
-                ext.as_ref()
-            ))
+        let mut tags = tags.into_iter();
+        match tags.next() {
+            Some(tag) => {
+                let inline_separator = INLINE_SEPARATOR.to_string();
+                Self(format!(
+                    "{}{EXT_SEPARATOR}{}",
+                    std::iter::once(tag)
+                        .chain(tags)
+                        .format_with(&inline_separator, |tag, f| f(&tag.as_ref())),
+                    ext.as_ref()
+                ))
+            }
+            None => Self(format!("{TAG_IGNORE}{EXT_SEPARATOR}{}", ext.as_ref())),
         }
     }
 
@@ -306,14 +309,14 @@ mod tests {
     #[test]
     fn from_tags_adds_ignored_tag_if_no_tags() {
         assert_eq!(
-            TaggedPath::from_tags::<Tag, _>(&[], ext("x")).to_string(),
+            TaggedPath::from_tags::<Tag, _>([], ext("x")).to_string(),
             "_.x"
         );
     }
 
     #[proptest]
     fn from_tags_matches_new(tags: Vec<Tag>, ext: Ext) {
-        let path = TaggedPath::from_tags(&tags, ext);
+        let path = TaggedPath::from_tags(tags, ext);
         prop_assert_eq!(TaggedPath::from_path(path.as_path()).unwrap(), path);
     }
 
