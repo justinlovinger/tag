@@ -45,6 +45,10 @@ impl TagRef {
     #[ref_cast_custom]
     pub(crate) const unsafe fn new_unchecked(s: &str) -> &Self;
 
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
     pub fn as_path(&self) -> &Path {
         self.0.as_ref()
     }
