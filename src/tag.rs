@@ -31,10 +31,6 @@ impl Tag {
             Ok(Tag(s))
         }
     }
-
-    pub fn as_path(&self) -> &Path {
-        self.0.as_ref()
-    }
 }
 
 impl FromStr for Tag {

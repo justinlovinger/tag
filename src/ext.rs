@@ -28,14 +28,6 @@ impl Ext {
             Ok(Ext(s))
         }
     }
-
-    pub fn as_path(&self) -> &Path {
-        self.0.as_ref()
-    }
-
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
 }
 
 impl FromStr for Ext {
