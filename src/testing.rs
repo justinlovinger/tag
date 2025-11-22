@@ -2,6 +2,7 @@ use once_cell::sync::Lazy;
 
 use crate::{DIR_SEPARATOR, INLINE_SEPARATOR};
 
+#[allow(unused_imports)]
 pub use self::{ext::*, fs::*, tag::*, tagged_filesystem::*, tagged_path::*};
 
 static SEPARATOR_REGEX: Lazy<String> = Lazy::new(|| format!("[{INLINE_SEPARATOR}{DIR_SEPARATOR}]"));
@@ -124,7 +125,7 @@ mod tagged_path {
         sample::select,
     };
 
-    use crate::{Ext, Tag, TaggedPath, EXT_SEPARATOR, TAG_IGNORE};
+    use crate::{Ext, Tag, TaggedPath, EXT_SEPARATOR};
 
     use super::{SEPARATOR_REGEX, TAGS};
 
@@ -169,18 +170,14 @@ mod tagged_path {
 
     impl fmt::Display for RawTaggedPath {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            if self.tags.is_empty() {
-                TAG_IGNORE.fmt(f)?;
-            } else {
-                for (tag, sep) in self
-                    .tags
-                    .iter()
-                    .zip(self.seps.iter().map(Some).chain([None]))
-                {
-                    tag.fmt(f)?;
-                    if let Some(sep) = sep {
-                        sep.fmt(f)?;
-                    }
+            for (tag, sep) in self
+                .tags
+                .iter()
+                .zip(self.seps.iter().map(Some).chain([None]))
+            {
+                tag.fmt(f)?;
+                if let Some(sep) = sep {
+                    sep.fmt(f)?;
                 }
             }
             EXT_SEPARATOR.fmt(f)?;
@@ -259,7 +256,11 @@ mod ext {
         "cpp", "dir", "html", "jpg", "md", "mp3", "mp4", "nix", "pdf", "rs", "txt", "AppImage",
     ];
 
-    pub fn ext(s: &str) -> Ext {
+    #[allow(dead_code)]
+    pub fn ext<S>(s: S) -> Ext
+    where
+        S: Into<String>,
+    {
         Ext::new(s).unwrap()
     }
 

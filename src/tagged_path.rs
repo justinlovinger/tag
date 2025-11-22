@@ -171,20 +171,13 @@ impl TaggedPath {
         T: AsRef<TagRef>,
         E: AsRef<ExtRef>,
     {
-        let mut tags = tags.into_iter();
-        match tags.next() {
-            Some(tag) => {
-                let inline_separator = INLINE_SEPARATOR.to_string();
-                Self(format!(
-                    "{}{EXT_SEPARATOR}{}",
-                    std::iter::once(tag)
-                        .chain(tags)
-                        .format_with(&inline_separator, |tag, f| f(&tag.as_ref())),
-                    ext.as_ref()
-                ))
-            }
-            None => Self(format!("{TAG_IGNORE}{EXT_SEPARATOR}{}", ext.as_ref())),
-        }
+        let inline_separator = INLINE_SEPARATOR.to_string();
+        Self(format!(
+            "{}{EXT_SEPARATOR}{}",
+            tags.into_iter()
+                .format_with(&inline_separator, |tag, f| f(&tag.as_ref())),
+            ext.as_ref()
+        ))
     }
 
     pub fn into_path(self) -> PathBuf {
@@ -274,6 +267,11 @@ mod tests {
         assert!(TaggedPath::new("foo-.baz").is_ok());
     }
 
+    #[test]
+    fn new_returns_ok_for_paths_with_no_tags() {
+        assert!(TaggedPath::new(".baz").is_ok());
+    }
+
     #[proptest]
     fn new_returns_ok_iff_all_tags_are_valid(#[strategy(MAYBE_TAGGED_PATH.as_str())] s: String) {
         // This test intentionally allows some invalid paths
@@ -306,18 +304,10 @@ mod tests {
         assert!(TaggedPath::new("foo./baz").is_err());
     }
 
-    #[test]
-    fn from_tags_adds_ignored_tag_if_no_tags() {
-        assert_eq!(
-            TaggedPath::from_tags::<Tag, _>([], ext("x")).to_string(),
-            "_.x"
-        );
-    }
-
     #[proptest]
     fn from_tags_matches_new(tags: Vec<Tag>, ext: Ext) {
         let path = TaggedPath::from_tags(tags, ext);
-        prop_assert_eq!(TaggedPath::from_path(path.as_path()).unwrap(), path);
+        prop_assert_eq!(TaggedPath::new(path.as_str()).unwrap(), path);
     }
 
     #[proptest]
