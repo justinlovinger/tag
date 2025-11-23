@@ -118,8 +118,6 @@ mod tagged_filesystem {
 mod tagged_path {
     use std::fmt;
 
-    use itertools::Itertools;
-
     use proptest::{
         prelude::{prop::collection::vec, *},
         sample::select,
@@ -198,7 +196,11 @@ mod tagged_path {
         fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
             (
                 vec(select(TAGS), params.min_tags..=params.max_tags)
-                    .prop_map(|tags| tags.into_iter().map(|x| Tag::new(x).unwrap()).collect_vec())
+                    .prop_map(|tags| {
+                        tags.into_iter()
+                            .map(|x| Tag::new(x).unwrap())
+                            .collect::<Vec<_>>()
+                    })
                     .prop_flat_map(|tags| {
                         (
                             vec(SEPARATOR_REGEX.as_str(), tags.len().saturating_sub(1)).prop_map(

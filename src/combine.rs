@@ -361,12 +361,12 @@ mod tests {
                     .tags()
                     .filter(|tag| !RE.is_match(tag.as_str()))
                     .map(|tag| tag.to_owned())
-                    .collect_vec())
-                .collect_vec(),
+                    .collect::<Vec<_>>())
+                .collect::<Vec<_>>(),
             paths
                 .into_iter()
-                .map(|path| path.tags().map(|tag| tag.to_owned()).collect_vec())
-                .collect_vec()
+                .map(|path| path.tags().map(|tag| tag.to_owned()).collect::<Vec<_>>())
+                .collect::<Vec<_>>()
         );
     }
 
@@ -375,11 +375,11 @@ mod tests {
         prop_assert_eq!(
             combine(&paths.0)
                 .map(|path| TaggedPath::from_path(path).unwrap().ext().to_owned())
-                .collect_vec(),
+                .collect::<Vec<_>>(),
             paths
                 .into_iter()
                 .map(|path| path.ext().to_owned())
-                .collect_vec()
+                .collect::<Vec<_>>()
         );
     }
 }
