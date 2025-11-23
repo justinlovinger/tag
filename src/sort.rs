@@ -1,43 +1,26 @@
 use internment::Intern;
-use itertools::Itertools;
 
-use crate::{ExtRef, Tag, TagRef, TaggedPath, EXT_SEPARATOR, INLINE_SEPARATOR, TAG_IGNORE};
+use crate::{Tag, TaggedPath};
 
 use self::partition::{Partition, TagsPaths};
 
+/// Sort tags by subfrequency
+///
+/// Paths are returned in the order given.
+///
+/// Subfrequency is frequency calculated within each subset
+/// formed by selecting the next tag.
+/// For example,
+/// in `foo-baz-bar.x foo.x foo.x foo-bar.x baz.x baz.x`,
+/// `foo-baz-bar.x` is sorted as `foo-bar-baz.x`
+/// because `bar` is more common than `baz`
+/// within the subset of paths containing `foo`,
+/// even though `baz` is more common globally.
 pub fn sort_tags_by_subfrequency(paths: &[TaggedPath]) -> impl Iterator<Item = TaggedPath> + '_ {
     let mut res = sort_tags_by_subfrequency_(paths);
     res.sort_by_key(|(i, (_, _))| *i);
-    res.into_iter().map(|(_, (orig, tags))| {
-        from_tags_with_ignored(&tags, &orig.ignored_tags().collect::<Vec<_>>(), orig.ext())
-    })
-}
-
-fn from_tags_with_ignored<T, J, E>(tags: &[T], ignored_tags: &[J], ext: E) -> TaggedPath
-where
-    T: AsRef<TagRef>,
-    J: AsRef<str>,
-    E: AsRef<ExtRef>,
-{
-    let sep = if tags.is_empty() || ignored_tags.is_empty() {
-        String::new()
-    } else {
-        INLINE_SEPARATOR.to_string()
-    };
-    TaggedPath::new(format!(
-        "{}{sep}{}{EXT_SEPARATOR}{}",
-        tags.iter()
-            .map(|tag| tag.as_ref())
-            .format(INLINE_SEPARATOR.to_string().as_str()),
-        ignored_tags
-            .iter()
-            .format_with(INLINE_SEPARATOR.to_string().as_str(), |s, f| {
-                f(&TAG_IGNORE)?;
-                f(&s.as_ref())
-            }),
-        ext.as_ref(),
-    ))
-    .unwrap()
+    res.into_iter()
+        .map(|(_, (orig, tags))| TaggedPath::from_tags(tags, orig.ext()))
 }
 
 type SortedTags<'a> = Vec<(usize, (&'a TaggedPath, Vec<Intern<Tag>>))>;

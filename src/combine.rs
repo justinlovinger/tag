@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, path::PathBuf};
+use std::path::PathBuf;
 
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
@@ -6,9 +6,18 @@ use smallvec::SmallVec;
 
 use crate::{
     TagRef, TaggedPath, DIR_SEPARATOR, EXT_SEPARATOR, INLINE_SEPARATOR, PATH_PART_MAX_LEN,
-    TAG_IGNORE,
 };
 
+const FILLER_TAG: char = '_';
+
+/// Return paths with optimal directory separators
+///
+/// Paths are returned in the order given.
+///
+/// At most one tag of the form `_[0-9]*` may be added
+/// to each path
+/// to avoid files starting with `.` and being hidden in Linux
+/// or to differentiate paths.
 pub fn combine(paths: &[TaggedPath]) -> impl Iterator<Item = PathBuf> + '_ {
     let mut res = combine_(
         paths
@@ -101,7 +110,7 @@ where
                                     {
                                         EXT_SEPARATOR.to_string()
                                     } else {
-                                        format!("{DIR_SEPARATOR}{TAG_IGNORE}{EXT_SEPARATOR}")
+                                        format!("{DIR_SEPARATOR}{FILLER_TAG}{EXT_SEPARATOR}")
                                     },
                                     path.ext(),
                                 )),
@@ -174,30 +183,16 @@ where
                     orig_i,
                     (
                         path,
-                        prefix.join(format!("{TAG_IGNORE}{EXT_SEPARATOR}{}", path.ext())),
+                        prefix.join(format!("{FILLER_TAG}{EXT_SEPARATOR}{}", path.ext())),
                     ),
                 ));
             } else {
-                let mut ids: BTreeSet<_> = (1..=paths.len()).collect();
-                let paths_ids: Vec<_> = paths
-                    .iter()
-                    .map(|(_, path)| {
-                        path.ignored_tags()
-                            // We explicitly want to remove from `ids`.
-                            // `ids` should only contain ids not in `paths_ids`.
-                            .filter_map(|s| s.parse().map_or(None, |x| ids.remove(&x).then_some(x)))
-                            .next()
-                    })
-                    .collect();
-                for ((orig_i, path), id) in paths.into_iter().zip(paths_ids) {
-                    let id = id.unwrap_or_else(|| {
-                        ids.pop_first().expect("`ids` should contain enough ids")
-                    });
+                for (id, (orig_i, path)) in (1..).zip(paths) {
                     res.push((
                         orig_i,
                         (
                             path,
-                            prefix.join(format!("{TAG_IGNORE}{id}{EXT_SEPARATOR}{}", path.ext())),
+                            prefix.join(format!("{FILLER_TAG}{id}{EXT_SEPARATOR}{}", path.ext())),
                         ),
                     ));
                 }
@@ -221,7 +216,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::LazyLock;
+
     use proptest::prelude::*;
+    use regex::Regex;
     use test_strategy::proptest;
 
     use crate::testing::{tagged_path, TaggedPaths};
@@ -322,31 +320,31 @@ mod tests {
     }
 
     #[test]
-    fn combine_adds_ignored_tag() {
+    fn combine_adds_filler_tag() {
         assert_eq!(
-            combine(&[tagged_path("_foo.x")]).collect::<Vec<_>>(),
+            combine(&[tagged_path(".x")]).collect::<Vec<_>>(),
             [PathBuf::from("_.x")]
         );
     }
 
     #[test]
-    fn combine_adds_different_ignored_tags_to_multiple_with_same_extension() {
+    fn combine_adds_different_filler_tags_to_multiple_paths_with_same_extension() {
         assert_eq!(
-            combine(&[tagged_path("_foo.x"), tagged_path("_foo.x")]).collect::<Vec<_>>(),
+            combine(&[tagged_path(".x"), tagged_path(".x")]).collect::<Vec<_>>(),
             [PathBuf::from("_1.x"), PathBuf::from("_2.x")]
         );
     }
 
     #[test]
-    fn combine_adds_same_ignored_tag_to_multiple_with_different_extensions() {
+    fn combine_adds_same_filler_tag_to_multiple_paths_with_different_extensions() {
         assert_eq!(
-            combine(&[tagged_path("_foo.x"), tagged_path("_foo.y")]).collect::<Vec<_>>(),
+            combine(&[tagged_path(".x"), tagged_path(".y")]).collect::<Vec<_>>(),
             [PathBuf::from("_.x"), PathBuf::from("_.y")]
         );
     }
 
     #[test]
-    fn combine_adds_ignored_tag_after_slash() {
+    fn combine_adds_filler_tag_after_slash() {
         assert_eq!(
             combine(&[tagged_path("a.x"), tagged_path("a-b.x"),]).collect::<Vec<_>>(),
             [PathBuf::from("a/_.x"), PathBuf::from("a/b.x")]
@@ -354,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn combine_adds_ignored_tag_after_slash_from_long_inline() {
+    fn combine_adds_filler_tag_after_slash_from_long_inline() {
         let a = "a".repeat(100);
         let b = "b".repeat(100);
         let c = "c".repeat(100);
@@ -364,25 +362,15 @@ mod tests {
         );
     }
 
-    #[test]
-    fn combine_reuses_ignored_tags() {
-        assert_eq!(
-            combine(&[tagged_path("_1.x"), tagged_path("_2.x")]).collect::<Vec<_>>(),
-            [PathBuf::from("_1.x"), PathBuf::from("_2.x")]
-        );
-        assert_eq!(
-            combine(&[tagged_path("_2.x"), tagged_path("_1.x")]).collect::<Vec<_>>(),
-            [PathBuf::from("_2.x"), PathBuf::from("_1.x")]
-        );
-    }
-
     #[proptest]
-    fn combine_does_not_change_tags(paths: TaggedPaths) {
+    fn combine_does_not_change_tags_except_for_adding_filler_tags(paths: TaggedPaths) {
+        static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^_[0-9]*$").unwrap());
         prop_assert_eq!(
             combine(&paths.0)
                 .map(|path| TaggedPath::from_path(path)
                     .unwrap()
                     .tags()
+                    .filter(|tag| !RE.is_match(tag.as_str()))
                     .map(|tag| tag.to_owned())
                     .collect_vec())
                 .collect_vec(),

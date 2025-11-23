@@ -25,7 +25,6 @@ pub const INLINE_SEPARATOR: char = '-';
 pub const DIR_SEPARATOR: char = '/';
 pub const EXT_SEPARATOR: char = '.';
 pub const SEPARATORS: [char; 3] = [INLINE_SEPARATOR, DIR_SEPARATOR, EXT_SEPARATOR];
-pub const TAG_IGNORE: char = '_';
 
 // We _could_ examine the actual filesystem
 // to find a more accurate limit.

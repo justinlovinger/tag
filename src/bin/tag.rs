@@ -61,9 +61,14 @@ enum Commands {
         #[arg(value_name = "PATH")]
         paths: Vec<TaggedPath>,
     },
-    /// Combine paths into optimal directories
+    /// Return paths with optimal directory separators
     ///
     /// Paths are returned in the order given.
+    ///
+    /// At most one tag of the form `_[0-9]*` may be added
+    /// to each path
+    /// to avoid files starting with `.` and being hidden in Linux
+    /// or to differentiate paths.
     Combine {
         #[arg(value_name = "PATH")]
         paths: Vec<TaggedPath>,

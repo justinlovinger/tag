@@ -11,7 +11,7 @@ use derive_more::Display;
 use itertools::Itertools;
 use ref_cast::{ref_cast_custom, RefCastCustom};
 
-use crate::{ExtRef, TagRef, DIR_SEPARATOR, EXT_SEPARATOR, INLINE_SEPARATOR, TAG_IGNORE};
+use crate::{ExtRef, TagRef, DIR_SEPARATOR, EXT_SEPARATOR, INLINE_SEPARATOR};
 
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 #[error("`{0}` is not a tagged path: tagged paths must end with an extension")]
@@ -198,21 +198,9 @@ impl TaggedPathRef {
     pub fn tags(&self) -> impl Iterator<Item = &TagRef> {
         self.tags_str()
             .split([INLINE_SEPARATOR, DIR_SEPARATOR])
-            .filter(|s| !s.is_empty() && !s.starts_with(TAG_IGNORE))
+            .filter(|s| !s.is_empty())
             // SAFETY: invalid tags are filtered above.
             .map(|s| unsafe { TagRef::new_unchecked(s) })
-    }
-
-    // If this is made public,
-    // it should have unit tests.
-    pub(crate) fn ignored_tags(&self) -> impl Iterator<Item = &str> {
-        self.tags_str()
-            .split([INLINE_SEPARATOR, DIR_SEPARATOR])
-            .filter(|s| s.starts_with(TAG_IGNORE))
-            .map(|s| {
-                s.strip_prefix(TAG_IGNORE)
-                    .expect("ignored tags should start with TAG_IGNORE")
-            })
     }
 
     fn tags_str(&self) -> &str {
@@ -349,66 +337,6 @@ mod tests {
         assert_eq!(
             tagged_path("foo-.baz").tags().collect::<Vec<_>>(),
             [tag("foo")]
-        );
-    }
-
-    #[test]
-    fn tags_ignores_ignored_tags() {
-        assert_eq!(
-            TaggedPath::new("foo-_.x")
-                .unwrap()
-                .tags()
-                .map(|tag| tag.to_owned())
-                .collect_vec(),
-            [tag("foo")]
-        );
-        assert_eq!(
-            TaggedPath::new("foo/_.x")
-                .unwrap()
-                .tags()
-                .map(|tag| tag.to_owned())
-                .collect_vec(),
-            [tag("foo")]
-        );
-        assert_eq!(
-            TaggedPath::new("foo-_-bar.x")
-                .unwrap()
-                .tags()
-                .map(|tag| tag.to_owned())
-                .collect_vec(),
-            [tag("foo"), tag("bar")]
-        );
-        assert_eq!(
-            TaggedPath::new("foo-_bar-biz.x")
-                .unwrap()
-                .tags()
-                .map(|tag| tag.to_owned())
-                .collect_vec(),
-            [tag("foo"), tag("biz")]
-        );
-        assert_eq!(
-            TaggedPath::new("foo-_-bar-_.x")
-                .unwrap()
-                .tags()
-                .map(|tag| tag.to_owned())
-                .collect_vec(),
-            [tag("foo"), tag("bar")]
-        );
-        assert_eq!(
-            TaggedPath::new("foo-_bar-biz-_baz.x")
-                .unwrap()
-                .tags()
-                .map(|tag| tag.to_owned())
-                .collect_vec(),
-            [tag("foo"), tag("biz")]
-        );
-        assert_eq!(
-            TaggedPath::new("foo/_bar-biz/_baz.x")
-                .unwrap()
-                .tags()
-                .map(|tag| tag.to_owned())
-                .collect_vec(),
-            [tag("foo"), tag("biz")]
         );
     }
 

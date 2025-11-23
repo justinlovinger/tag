@@ -13,18 +13,19 @@ A utility to automatically organize files with a simple tagging system.
 A tagged path consists of zero or more tags
 and an extension.
 Each tag ends with `-`, `/`, or `.`.
-Tags starting with `_` are ignored.
 Characters after the first `.` are the extension.
 For example,
-`foo-bar.baz`
-is a path with tags `foo` and `bar`
+`foo-bar.baz` is a path with tags `foo` and `bar`
 and extension `baz`.
-`foo/bar.baz`
-and `foo/bar/_.baz`
-are equivalent.
+`foo/bar.baz` is equivalent.
 Extensions can contain `.`.
 For example,
 `foo.tar.gz` has the extension `tar.gz`.
+
+Some functions may add `_` as a tag
+to avoid files starting with `.` and being hidden in Linux.
+Some functions may add `_[0-9]+` as a tag
+to differentiate paths.
 
 Metadata may be stored in `.tag/`.
 A directory containing `.tag/` is the root of a tagged filesystem.

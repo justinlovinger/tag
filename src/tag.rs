@@ -3,10 +3,10 @@ use std::{borrow::Borrow, cmp::Ordering, ops::Deref, path::Path, str::FromStr};
 use derive_more::Display;
 use ref_cast::{ref_cast_custom, RefCastCustom};
 
-use crate::{DIR_SEPARATOR, EXT_SEPARATOR, INLINE_SEPARATOR, SEPARATORS, TAG_IGNORE};
+use crate::{DIR_SEPARATOR, EXT_SEPARATOR, INLINE_SEPARATOR, SEPARATORS};
 
 #[derive(Debug, thiserror::Error)]
-#[error("Invalid tag: `{0}`. Tags cannot start with `{TAG_IGNORE}` or contain `{INLINE_SEPARATOR}`, `{DIR_SEPARATOR}`, or `{EXT_SEPARATOR}`.")]
+#[error("Invalid tag: `{0}`. A tag cannot be empty or contain `{INLINE_SEPARATOR}`, `{DIR_SEPARATOR}`, or `{EXT_SEPARATOR}`.")]
 pub struct TagError(String);
 
 #[derive(Clone, Debug, Display, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -22,10 +22,7 @@ impl Tag {
         S: Into<String>,
     {
         let s = s.into();
-        if s.is_empty()
-            || s.starts_with(TAG_IGNORE)
-            || s.chars().any(|c| SEPARATORS.iter().any(|sep| &c == sep))
-        {
+        if s.is_empty() || s.chars().any(|c| SEPARATORS.iter().any(|sep| &c == sep)) {
             Err(TagError(s))
         } else {
             Ok(Tag(s))
@@ -164,12 +161,6 @@ mod tests {
     #[test]
     fn new_returns_none_for_empty_strings() {
         assert!(Tag::new(String::new()).is_err());
-    }
-
-    #[proptest]
-    fn new_returns_none_for_strings_starting_with_tag_ignore(tag: Tag) {
-        let s = format!("{TAG_IGNORE}{tag}");
-        prop_assert!(Tag::new(s).is_err());
     }
 
     #[proptest]
