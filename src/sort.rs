@@ -16,16 +16,14 @@ use self::partition::{Partition, TagsPaths};
 /// because `bar` is more common than `baz`
 /// within the subset of paths containing `foo`,
 /// even though `baz` is more common globally.
-pub fn sort_tags_by_subfrequency(paths: &[TaggedPath]) -> impl Iterator<Item = TaggedPath> + '_ {
+pub fn sort_tags_by_subfrequency(paths: &[TaggedPath]) -> impl Iterator<Item = TaggedPath> {
     let mut res = sort_tags_by_subfrequency_(paths);
-    res.sort_by_key(|(i, (_, _))| *i);
-    res.into_iter()
-        .map(|(_, (orig, tags))| TaggedPath::from_tags(tags, orig.ext()))
+    res.sort_by_key(|(i, _)| *i);
+    res.into_iter().map(|(_, path)| path)
 }
 
-type SortedTags<'a> = Vec<(usize, (&'a TaggedPath, Vec<Intern<Tag>>))>;
-fn sort_tags_by_subfrequency_(paths: &[TaggedPath]) -> SortedTags<'_> {
-    fn sort_inner(paths: Partition<'_>, prefix: Vec<Intern<Tag>>) -> SortedTags<'_> {
+fn sort_tags_by_subfrequency_(paths: &[TaggedPath]) -> Vec<(usize, TaggedPath)> {
+    fn sort_inner(paths: Partition<'_>, prefix: Vec<Intern<Tag>>) -> Vec<(usize, TaggedPath)> {
         stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
             if let Some(tag) = tag_to_split(paths.tags_paths()) {
                 let (with_tag, without_tag) = paths.partition(tag);
@@ -54,7 +52,10 @@ fn sort_tags_by_subfrequency_(paths: &[TaggedPath]) -> SortedTags<'_> {
                         });
                         (
                             i,
-                            (path, prefix.iter().copied().chain(inline_tags).collect()),
+                            TaggedPath::from_tags(
+                                prefix.iter().copied().chain(inline_tags),
+                                path.ext(),
+                            ),
                         )
                     })
                     .collect()
