@@ -18,7 +18,7 @@ const FILLER_TAG: char = '_';
 /// to each path
 /// to avoid files starting with `.` and being hidden in Linux
 /// or to differentiate paths.
-pub fn combine(paths: &[TaggedPath]) -> impl Iterator<Item = PathBuf> + '_ {
+pub fn combine(paths: &[TaggedPath]) -> impl Iterator<Item = PathBuf> {
     let mut res = combine_(
         paths
             .iter()
@@ -29,21 +29,19 @@ pub fn combine(paths: &[TaggedPath]) -> impl Iterator<Item = PathBuf> + '_ {
             .enumerate()
             .collect(),
     );
-    res.sort_by_key(|(i, (_, _))| *i);
-    res.into_iter().map(|(_, (_, path))| path)
+    res.sort_by_key(|(i, _)| *i);
+    res.into_iter().map(|(_, path)| path)
 }
 
-fn combine_<T>(
-    mut paths: Vec<(usize, (&TaggedPath, Vec<T>))>,
-) -> Vec<(usize, (&TaggedPath, PathBuf))>
+fn combine_<T>(mut paths: Vec<(usize, (&TaggedPath, Vec<T>))>) -> Vec<(usize, PathBuf)>
 where
     T: AsRef<TagRef>,
 {
-    fn combine_inner<'a, T>(
-        sorted: &[(usize, (&'a TaggedPath, Vec<T>))],
+    fn combine_inner<T>(
+        sorted: &[(usize, (&TaggedPath, Vec<T>))],
         prefix: PathBuf,
         tag_index: usize,
-    ) -> Vec<(usize, (&'a TaggedPath, PathBuf))>
+    ) -> Vec<(usize, PathBuf)>
     where
         T: AsRef<TagRef>,
     {
@@ -88,33 +86,30 @@ where
                             .collect::<SmallVec<[char; 8]>>(); // `SmallVec` should handle most cases without heap-allocation.
                         res.push((
                             *orig_i,
-                            (
-                                *path,
-                                prefix.join(format!(
-                                    "{}{}{}",
-                                    inline_tags
-                                        .iter()
-                                        .zip(separators.into_iter().map(Some).chain([None]))
-                                        .format_with("", |(tag, sep), f| {
-                                            f(&tag.as_ref())?;
-                                            if let Some(sep) = sep {
-                                                f(&sep)?;
-                                            }
-                                            Ok(())
-                                        }),
-                                    if len
-                                        + inline_tags.last().map_or(0, |tag| tag.as_ref().len())
-                                        + EXT_SEPARATOR.len_utf8()
-                                        + path.ext().len()
-                                        <= PATH_PART_MAX_LEN
-                                    {
-                                        EXT_SEPARATOR.to_string()
-                                    } else {
-                                        format!("{DIR_SEPARATOR}{FILLER_TAG}{EXT_SEPARATOR}")
-                                    },
-                                    path.ext(),
-                                )),
-                            ),
+                            prefix.join(format!(
+                                "{}{}{}",
+                                inline_tags
+                                    .iter()
+                                    .zip(separators.into_iter().map(Some).chain([None]))
+                                    .format_with("", |(tag, sep), f| {
+                                        f(&tag.as_ref())?;
+                                        if let Some(sep) = sep {
+                                            f(&sep)?;
+                                        }
+                                        Ok(())
+                                    }),
+                                if len
+                                    + inline_tags.last().map_or(0, |tag| tag.as_ref().len())
+                                    + EXT_SEPARATOR.len_utf8()
+                                    + path.ext().len()
+                                    <= PATH_PART_MAX_LEN
+                                {
+                                    EXT_SEPARATOR.to_string()
+                                } else {
+                                    format!("{DIR_SEPARATOR}{FILLER_TAG}{EXT_SEPARATOR}")
+                                },
+                                path.ext(),
+                            )),
                         ));
                     } else {
                         let (_, (_, tags_of_last)) = &sorted[j - 1];
@@ -181,19 +176,13 @@ where
                 let (orig_i, path) = paths.into_iter().next().unwrap();
                 res.push((
                     orig_i,
-                    (
-                        path,
-                        prefix.join(format!("{FILLER_TAG}{EXT_SEPARATOR}{}", path.ext())),
-                    ),
+                    prefix.join(format!("{FILLER_TAG}{EXT_SEPARATOR}{}", path.ext())),
                 ));
             } else {
                 for (id, (orig_i, path)) in (1..).zip(paths) {
                     res.push((
                         orig_i,
-                        (
-                            path,
-                            prefix.join(format!("{FILLER_TAG}{id}{EXT_SEPARATOR}{}", path.ext())),
-                        ),
+                        prefix.join(format!("{FILLER_TAG}{id}{EXT_SEPARATOR}{}", path.ext())),
                     ));
                 }
             }
