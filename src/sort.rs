@@ -1,6 +1,8 @@
+use std::marker::Sync;
+
 use internment::Intern;
 
-use crate::{Tag, TaggedPath};
+use crate::{Tag, TaggedPath, TaggedPathRef};
 
 use self::partition::{Partition, TagsPaths};
 
@@ -16,31 +18,44 @@ use self::partition::{Partition, TagsPaths};
 /// because `bar` is more common than `baz`
 /// within the subset of paths containing `foo`,
 /// even though `baz` is more common globally.
-pub fn sort_tags_by_subfrequency(paths: &[TaggedPath]) -> impl Iterator<Item = TaggedPath> {
+pub fn sort_tags_by_subfrequency<P>(paths: &[P]) -> impl Iterator<Item = TaggedPath>
+where
+    P: AsRef<TaggedPathRef> + Sync,
+{
     let mut res = sort_tags_by_subfrequency_(paths);
     res.sort_by_key(|(i, _)| *i);
     res.into_iter().map(|(_, path)| path)
 }
 
-fn sort_tags_by_subfrequency_(paths: &[TaggedPath]) -> Vec<(usize, TaggedPath)> {
-    fn sort_inner(paths: Partition<'_>, prefix: Vec<Intern<Tag>>) -> Vec<(usize, TaggedPath)> {
+fn sort_tags_by_subfrequency_<P>(paths: &[P]) -> Vec<(usize, TaggedPath)>
+where
+    P: AsRef<TaggedPathRef> + Sync,
+{
+    fn sort_inner<P>(
+        paths: &[P],
+        subpaths: Partition,
+        prefix: Vec<Intern<Tag>>,
+    ) -> Vec<(usize, TaggedPath)>
+    where
+        P: AsRef<TaggedPathRef> + Sync,
+    {
         stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
-            if let Some(tag) = tag_to_split(paths.tags_paths()) {
-                let (with_tag, without_tag) = paths.partition(tag);
+            if let Some(tag) = tag_to_split(subpaths.tags_paths()) {
+                let (with_tag, without_tag) = subpaths.partition(tag);
                 debug_assert_ne!(with_tag.len(), 0);
 
                 let with_tag_prefix = prefix.iter().cloned().chain([tag]).collect();
                 let (mut xs, ys) = rayon::join(
-                    || sort_inner(with_tag, with_tag_prefix),
-                    || sort_inner(without_tag, prefix),
+                    || sort_inner(paths, with_tag, with_tag_prefix),
+                    || sort_inner(paths, without_tag, prefix),
                 );
                 xs.extend(ys);
                 xs
             } else {
-                debug_assert_eq!(paths.tags_paths().len(), 0);
-                paths
+                debug_assert_eq!(subpaths.tags_paths().len(), 0);
+                subpaths
                     .finalize()
-                    .map(|(i, path, mut inline_tags)| {
+                    .map(|(i, mut inline_tags)| {
                         // Unstable sort is fine
                         // because the comparison function only returns items equal
                         // when actually equal.
@@ -54,7 +69,7 @@ fn sort_tags_by_subfrequency_(paths: &[TaggedPath]) -> Vec<(usize, TaggedPath)> 
                             i,
                             TaggedPath::from_tags(
                                 prefix.iter().copied().chain(inline_tags),
-                                path.ext(),
+                                paths.get(i).unwrap().as_ref().ext(),
                             ),
                         )
                     })
@@ -76,7 +91,7 @@ fn sort_tags_by_subfrequency_(paths: &[TaggedPath]) -> Vec<(usize, TaggedPath)> 
             .map(|(tag, _)| *tag)
     }
 
-    sort_inner(Partition::new(paths), Default::default())
+    sort_inner(paths, Partition::new(paths), Default::default())
 }
 
 mod partition {
@@ -88,18 +103,17 @@ mod partition {
     use rustc_hash::{FxHashMap, FxHashSet};
     use smallvec::SmallVec;
 
-    use crate::{Tag, TaggedPath};
+    use crate::{Tag, TaggedPathRef};
 
     #[derive(Debug)]
-    pub struct Partition<'a> {
-        paths: &'a [TaggedPath],
-        tags_paths: TagsPaths<'a>,
-        paths_tags: PathsTags<'a>,
-        done_paths: DonePaths<'a>,
+    pub struct Partition {
+        tags_paths: TagsPaths,
+        paths_tags: PathsTags,
+        done_paths: DonePaths,
     }
 
-    pub type TagsPaths<'a> = FxHashMap<Intern<Tag>, FxHashSet<usize>>;
-    type PathsTags<'a> = FxHashMap<usize, PathTags>;
+    pub type TagsPaths = FxHashMap<Intern<Tag>, FxHashSet<usize>>;
+    type PathsTags = FxHashMap<usize, PathTags>;
 
     #[derive(Debug, Default)]
     struct PathTags {
@@ -107,12 +121,16 @@ mod partition {
         inline_tags: SmallVec<[Intern<Tag>; 1]>,
     }
 
-    type DonePaths<'a> = Vec<(usize, SmallVec<[Intern<Tag>; 1]>)>;
+    type DonePaths = Vec<(usize, SmallVec<[Intern<Tag>; 1]>)>;
 
-    impl<'a> Partition<'a> {
-        pub fn new(paths: &'a [TaggedPath]) -> Self {
+    impl Partition {
+        pub fn new<P>(paths: &[P]) -> Self
+        where
+            P: AsRef<TaggedPathRef>,
+        {
             let (paths_tags, done_paths): (PathsTags, _) =
                 paths.iter().enumerate().partition_map(|(i, path)| {
+                    let path = path.as_ref();
                     if path.tags().next().is_none() {
                         Either::Right((i, SmallVec::new()))
                     } else {
@@ -134,7 +152,6 @@ mod partition {
             }
 
             let mut this = Self {
-                paths,
                 tags_paths,
                 paths_tags,
                 done_paths,
@@ -167,7 +184,6 @@ mod partition {
 
         fn _partition(self, tag: Intern<Tag>, paths: FxHashSet<usize>) -> (Self, Self) {
             let mut with_tag = Self {
-                paths: self.paths,
                 tags_paths: Default::default(),
                 paths_tags: Default::default(),
                 done_paths: Default::default(),
@@ -218,7 +234,6 @@ mod partition {
             }
 
             let mut without_tag = Self {
-                paths: self.paths,
                 tags_paths: Default::default(),
                 paths_tags: Default::default(),
                 done_paths: replace(&mut self.done_paths, done_paths),
@@ -282,16 +297,12 @@ mod partition {
             self.paths_tags.len()
         }
 
-        pub fn tags_paths(&'_ self) -> &'_ TagsPaths<'_> {
+        pub fn tags_paths(&self) -> &TagsPaths {
             &self.tags_paths
         }
 
-        pub fn finalize(
-            self,
-        ) -> impl Iterator<Item = (usize, &'a TaggedPath, SmallVec<[Intern<Tag>; 1]>)> {
-            self.done_paths
-                .into_iter()
-                .map(|(i, tags)| (i, self.paths.get(i).unwrap(), tags))
+        pub fn finalize(self) -> impl Iterator<Item = (usize, SmallVec<[Intern<Tag>; 1]>)> {
+            self.done_paths.into_iter()
         }
     }
 }

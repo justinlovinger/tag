@@ -20,12 +20,15 @@ const FILLER_TAG: char = '_';
 /// to each path
 /// to avoid files starting with `.` and being hidden in Linux
 /// or to differentiate paths.
-pub fn combine(paths: &[TaggedPath]) -> impl Iterator<Item = PathBuf> {
+pub fn combine<P>(paths: &[P]) -> impl Iterator<Item = PathBuf>
+where
+    P: AsRef<TaggedPathRef>,
+{
     let mut res = combine_(
         paths
             .iter()
             .map(|path| {
-                let tags = path.tags().collect();
+                let tags = path.as_ref().tags().collect();
                 (path, tags)
             })
             .enumerate()
@@ -52,22 +55,25 @@ where
     })
 }
 
-fn combine_<T>(mut paths: Vec<(usize, (&TaggedPath, Vec<T>))>) -> Vec<(usize, PathBuf)>
+fn combine_<P, T>(mut paths: Vec<(usize, (P, Vec<T>))>) -> Vec<(usize, PathBuf)>
 where
+    P: AsRef<TaggedPathRef>,
     T: AsRef<TagRef>,
 {
-    fn combine_inner<T>(
-        sorted: &[(usize, (&TaggedPath, Vec<T>))],
+    fn combine_inner<P, T>(
+        sorted: &[(usize, (P, Vec<T>))],
         prefix: PathBuf,
         tag_index: usize,
     ) -> Vec<(usize, PathBuf)>
     where
+        P: AsRef<TaggedPathRef>,
         T: AsRef<TagRef>,
     {
         let mut res = Vec::new();
         let mut i = 0;
         let mut without_tags: FxHashMap<_, Vec<_>> = FxHashMap::default();
         while let Some((orig_i, (path, tags))) = sorted.get(i) {
+            let path = path.as_ref();
             match tags.get(tag_index) {
                 Some(tag) => {
                     let j = sorted
@@ -181,27 +187,24 @@ where
                     i = j;
                 }
                 None => {
-                    without_tags
-                        .entry(path.ext())
-                        .or_default()
-                        .push((*orig_i, *path));
+                    without_tags.entry(path.ext()).or_default().push(*orig_i);
                     i += 1;
                 }
             }
         }
 
-        for paths in without_tags.into_values() {
+        for (ext, paths) in without_tags.into_iter() {
             if paths.len() == 1 {
-                let (orig_i, path) = paths.into_iter().next().unwrap();
+                let orig_i = paths.into_iter().next().unwrap();
                 res.push((
                     orig_i,
-                    prefix.join(format!("{FILLER_TAG}{EXT_SEPARATOR}{}", path.ext())),
+                    prefix.join(format!("{FILLER_TAG}{EXT_SEPARATOR}{}", ext)),
                 ));
             } else {
-                for (id, (orig_i, path)) in (1..).zip(paths) {
+                for (id, orig_i) in (1..).zip(paths) {
                     res.push((
                         orig_i,
-                        prefix.join(format!("{FILLER_TAG}{id}{EXT_SEPARATOR}{}", path.ext())),
+                        prefix.join(format!("{FILLER_TAG}{id}{EXT_SEPARATOR}{}", ext)),
                     ));
                 }
             }
