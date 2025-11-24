@@ -6,7 +6,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand, ValueEnum};
-use tag::{combine, find, sort_tags_by_subfrequency, Tag, TaggedPath};
+use tag::{combine, find, sort_tags_by_subfrequency, uncombine, Tag, TaggedPath};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -73,6 +73,13 @@ enum Commands {
         #[arg(value_name = "PATH")]
         paths: Vec<TaggedPath>,
     },
+    /// Return paths without directory separators or `_[0-9]*` tags
+    ///
+    /// Paths are returned in the order given.
+    Uncombine {
+        #[arg(value_name = "PATH")]
+        paths: Vec<TaggedPath>,
+    },
 }
 
 #[derive(Copy, Clone, Default, ValueEnum)]
@@ -104,6 +111,7 @@ fn main() -> anyhow::Result<()> {
                 writeln!(out, "{}", path.display())?
             }
         }
+        Some(Commands::Uncombine { paths }) => print(uncombine(paths))?,
         None => {}
     }
 

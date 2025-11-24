@@ -1,11 +1,13 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::LazyLock};
 
 use itertools::Itertools;
+use regex::Regex;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::{
-    TagRef, TaggedPath, DIR_SEPARATOR, EXT_SEPARATOR, INLINE_SEPARATOR, PATH_PART_MAX_LEN,
+    TagRef, TaggedPath, TaggedPathRef, DIR_SEPARATOR, EXT_SEPARATOR, INLINE_SEPARATOR,
+    PATH_PART_MAX_LEN,
 };
 
 const FILLER_TAG: char = '_';
@@ -31,6 +33,23 @@ pub fn combine(paths: &[TaggedPath]) -> impl Iterator<Item = PathBuf> {
     );
     res.sort_by_key(|(i, _)| *i);
     res.into_iter().map(|(_, path)| path)
+}
+
+/// Return paths without directory separators or `_[0-9]*` tags
+///
+/// Paths are returned in the order given.
+pub fn uncombine<P>(paths: impl IntoIterator<Item = P>) -> impl Iterator<Item = TaggedPath>
+where
+    P: AsRef<TaggedPathRef>,
+{
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^_[0-9]*$").unwrap());
+    paths.into_iter().map(|path| {
+        let path = path.as_ref();
+        TaggedPath::from_tags(
+            path.tags().filter(|tag| !RE.is_match(tag.as_str())),
+            path.ext(),
+        )
+    })
 }
 
 fn combine_<T>(mut paths: Vec<(usize, (&TaggedPath, Vec<T>))>) -> Vec<(usize, PathBuf)>
@@ -205,10 +224,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::LazyLock;
-
     use proptest::prelude::*;
-    use regex::Regex;
     use test_strategy::proptest;
 
     use crate::testing::{tagged_path, TaggedPaths};
@@ -352,34 +368,22 @@ mod tests {
     }
 
     #[proptest]
-    fn combine_does_not_change_tags_except_for_adding_filler_tags(paths: TaggedPaths) {
-        static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^_[0-9]*$").unwrap());
+    fn uncombine_inverses_combine(paths: TaggedPaths) {
+        // `uncombine` doesn't return directory separators.
+        let paths = paths
+            .into_iter()
+            .map(|path| {
+                TaggedPath::new(
+                    path.as_str()
+                        .replace(DIR_SEPARATOR, &INLINE_SEPARATOR.to_string()),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
         prop_assert_eq!(
-            combine(&paths.0)
-                .map(|path| TaggedPath::from_path(path)
-                    .unwrap()
-                    .tags()
-                    .filter(|tag| !RE.is_match(tag.as_str()))
-                    .map(|tag| tag.to_owned())
-                    .collect::<Vec<_>>())
+            uncombine(combine(&paths).map(|path| TaggedPath::from_path(path).unwrap()))
                 .collect::<Vec<_>>(),
             paths
-                .into_iter()
-                .map(|path| path.tags().map(|tag| tag.to_owned()).collect::<Vec<_>>())
-                .collect::<Vec<_>>()
-        );
-    }
-
-    #[proptest]
-    fn combine_does_not_change_extensions(paths: TaggedPaths) {
-        prop_assert_eq!(
-            combine(&paths.0)
-                .map(|path| TaggedPath::from_path(path).unwrap().ext().to_owned())
-                .collect::<Vec<_>>(),
-            paths
-                .into_iter()
-                .map(|path| path.ext().to_owned())
-                .collect::<Vec<_>>()
-        );
+        )
     }
 }

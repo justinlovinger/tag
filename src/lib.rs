@@ -10,7 +10,7 @@ mod tagged_path;
 mod testing;
 
 pub use crate::{
-    combine::combine,
+    combine::{combine, uncombine},
     ext::{Ext, ExtRef},
     find::find,
     root::Root,
