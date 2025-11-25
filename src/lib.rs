@@ -1,23 +1,12 @@
-mod combine;
-mod ext;
 mod find;
+mod organize;
 mod root;
-mod sort;
-mod tag;
-mod tagged_path;
+mod types;
 
 #[cfg(test)]
 mod testing;
 
-pub use crate::{
-    combine::{combine, uncombine},
-    ext::{Ext, ExtRef},
-    find::find,
-    root::Root,
-    sort::sort_tags_by_subfrequency,
-    tag::{Tag, TagRef},
-    tagged_path::{TaggedPath, TaggedPathRef},
-};
+pub use self::{find::find, organize::*, root::Root, types::*};
 
 pub const METADATA_DIR: &str = ".tag";
 
