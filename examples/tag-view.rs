@@ -13,7 +13,7 @@ use std::{
 
 use clap::Parser;
 use itertools::Either;
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::prelude::*;
 use regex::Regex;
 use rustc_hash::FxHashSet;
 use tag::{

@@ -6,7 +6,7 @@ use std::{
 };
 
 use itertools::Itertools;
-use rayon::slice::ParallelSliceMut;
+use rayon::prelude::*;
 use regex::Regex;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;

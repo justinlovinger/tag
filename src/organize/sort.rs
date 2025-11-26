@@ -1,7 +1,7 @@
 use std::{marker::Sync, sync::mpsc, thread};
 
 use internment::Intern;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::prelude::*;
 
 use crate::{Tag, TaggedPath, TaggedPathRef};
 
