@@ -101,44 +101,45 @@ fn combine_inner<P, T>(
     P: AsRef<TaggedPathRef> + Sync,
     T: AsRef<TagRef> + Sync,
 {
-    while let Some((orig_i, (path, tags))) = sorted.first() {
-        match tags.get(tag_index) {
-            Some(tag) => {
-                let j = sorted
-                    .iter()
-                    .enumerate()
-                    .skip(1)
-                    .find(|(_, (_, (_, tags)))| {
-                        tags.get(tag_index)
-                            .is_none_or(|other| other.as_ref() != tag.as_ref())
-                    })
-                    .map(|(j, _)| j)
-                    .unwrap_or(sorted.len());
-                if j == 1 {
-                    // Note,
-                    // Using `rayon::join` here is a net slowdown.
-                    sender
-                        .send((*orig_i, combine_inline(prefix, path, &tags[tag_index..])))
-                        .unwrap();
-                    sorted = &sorted[1..];
-                } else {
-                    rayon::join(
-                        || {
-                            combine_next_tag_index(sender, &sorted[..j], prefix, tag_index);
-                        },
-                        || {
-                            combine_inner(sender, &sorted[j..], prefix, tag_index);
-                        },
-                    );
-                    break;
+    stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
+        while let Some((orig_i, (path, tags))) = sorted.first() {
+            match tags.get(tag_index) {
+                Some(tag) => {
+                    let j = sorted
+                        .iter()
+                        .enumerate()
+                        .skip(1)
+                        .find(|(_, (_, (_, tags)))| {
+                            tags.get(tag_index)
+                                .is_none_or(|other| other.as_ref() != tag.as_ref())
+                        })
+                        .map(|(j, _)| j)
+                        .unwrap_or(sorted.len());
+                    if j == 1 {
+                        // Note,
+                        // Using `rayon::join` here is a net slowdown.
+                        sender
+                            .send((*orig_i, combine_inline(prefix, path, &tags[tag_index..])))
+                            .unwrap();
+                        sorted = &sorted[1..];
+                    } else {
+                        rayon::join(
+                            || {
+                                combine_next_tag_index(sender, &sorted[..j], prefix, tag_index);
+                            },
+                            || {
+                                combine_inner(sender, &sorted[j..], prefix, tag_index);
+                            },
+                        );
+                        return;
+                    }
+                }
+                None => {
+                    return combine_without_tags(sender, sorted, prefix, tag_index);
                 }
             }
-            None => {
-                combine_without_tags(sender, sorted, prefix, tag_index);
-                break;
-            }
         }
-    }
+    })
 }
 
 fn combine_inline<P, T>(prefix: &Path, path: P, inline_tags: &[T]) -> PathBuf
