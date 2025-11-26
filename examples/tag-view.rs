@@ -59,6 +59,7 @@ fn main() {
     .unwrap();
     for (target, link) in targets.zip(
         combine(&sort_tags_by_subfrequency(&tagged_paths).collect::<Vec<_>>())
+            .into_iter()
             .map(|path| tmp.join(path)),
     ) {
         create_dir_all(link.parent().unwrap()).unwrap();

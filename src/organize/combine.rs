@@ -2,6 +2,7 @@ use std::{
     marker::Sync,
     path::{Path, PathBuf},
     sync::{mpsc, LazyLock},
+    thread,
 };
 
 use itertools::Itertools;
@@ -25,11 +26,11 @@ const FILLER_TAG: char = '_';
 /// to each path
 /// to avoid files starting with `.` and being hidden in Linux
 /// or to differentiate paths.
-pub fn combine<P>(paths: &[P]) -> impl Iterator<Item = PathBuf>
+pub fn combine<P>(paths: &[P]) -> Vec<PathBuf>
 where
     P: AsRef<TaggedPathRef> + Sync + Send,
 {
-    let mut res = combine_(
+    combine_(
         paths
             .iter()
             .map(|path| {
@@ -39,9 +40,6 @@ where
             .enumerate()
             .collect(),
     )
-    .collect::<Vec<_>>();
-    res.par_sort_unstable_by_key(|(i, _)| *i);
-    res.into_iter().map(|(_, path)| path)
 }
 
 /// Return paths without directory separators or `_[0-9]*` tags
@@ -61,7 +59,7 @@ where
     })
 }
 
-fn combine_<P, T>(mut paths: Vec<(usize, (P, Vec<T>))>) -> impl Iterator<Item = (usize, PathBuf)>
+fn combine_<P, T>(mut paths: Vec<(usize, (P, Vec<T>))>) -> Vec<PathBuf>
 where
     P: AsRef<TaggedPathRef> + Sync + Send,
     T: AsRef<TagRef> + Sync + Send,
@@ -73,9 +71,25 @@ where
             // Reversing the order places items with fewer tags at the end.
             .reverse()
     });
+
     let (sender, receiver) = mpsc::channel();
+    let len = paths.len();
+    let res = thread::spawn(move || {
+        let mut res = Vec::with_capacity(len);
+        let uninit = res.spare_capacity_mut();
+        for (i, path) in receiver.into_iter() {
+            let x: &mut std::mem::MaybeUninit<PathBuf> = &mut uninit[i]; // The Rust compiler can't infer this for some reason.
+            x.write(path);
+        }
+        // SAFETY: `receiver` contains an item for each index, which was just used to initialize the vector.
+        unsafe {
+            res.set_len(len);
+        }
+        res
+    });
     combine_inner(&sender, &paths, &PathBuf::new(), 0);
-    receiver.into_iter()
+    drop(sender);
+    res.join().unwrap()
 }
 
 fn combine_inner<P, T>(
@@ -288,7 +302,7 @@ mod tests {
     #[test]
     fn combine_separates_different_prefixes_by_inline() {
         assert_eq!(
-            combine(&[tagged_path("foo-bar.x"), tagged_path("baz-bin.x")]).collect::<Vec<_>>(),
+            combine(&[tagged_path("foo-bar.x"), tagged_path("baz-bin.x")]),
             [PathBuf::from("foo-bar.x"), PathBuf::from("baz-bin.x")]
         );
     }
@@ -296,7 +310,7 @@ mod tests {
     #[test]
     fn combine_separates_common_prefixes_by_dir() {
         assert_eq!(
-            combine(&[tagged_path("foo-bar.x"), tagged_path("foo-baz.x")]).collect::<Vec<_>>(),
+            combine(&[tagged_path("foo-bar.x"), tagged_path("foo-baz.x")]),
             [PathBuf::from("foo/bar.x"), PathBuf::from("foo/baz.x")]
         );
     }
@@ -304,8 +318,7 @@ mod tests {
     #[test]
     fn combine_separates_by_dir_and_inline() {
         assert_eq!(
-            combine(&[tagged_path("foo-bar-baz.x"), tagged_path("foo-baz-bar.x")])
-                .collect::<Vec<_>>(),
+            combine(&[tagged_path("foo-bar-baz.x"), tagged_path("foo-baz-bar.x")]),
             [
                 PathBuf::from("foo/bar-baz.x"),
                 PathBuf::from("foo/baz-bar.x")
@@ -316,8 +329,7 @@ mod tests {
     #[test]
     fn combine_uses_inline_in_common_prefixes() {
         assert_eq!(
-            combine(&[tagged_path("foo-bar-baz.x"), tagged_path("foo-bar-bin.x")])
-                .collect::<Vec<_>>(),
+            combine(&[tagged_path("foo-bar-baz.x"), tagged_path("foo-bar-bin.x")]),
             [
                 PathBuf::from("foo-bar/baz.x"),
                 PathBuf::from("foo-bar/bin.x"),
@@ -332,8 +344,7 @@ mod tests {
                 tagged_path("foo-bar-baz.x"),
                 tagged_path("foo-bar-bin.x"),
                 tagged_path("foo-bin.x"),
-            ])
-            .collect::<Vec<_>>(),
+            ]),
             [
                 PathBuf::from("foo/bar/baz.x"),
                 PathBuf::from("foo/bar/bin.x"),
@@ -351,8 +362,7 @@ mod tests {
             combine(&[
                 tagged_path(format!("{a}-{b}-{c}-baz.x")),
                 tagged_path(format!("{a}-{b}-{c}-bin.x")),
-            ])
-            .collect::<Vec<_>>(),
+            ]),
             [
                 PathBuf::from(format!("{a}-{b}/{c}/baz.x")),
                 PathBuf::from(format!("{a}-{b}/{c}/bin.x")),
@@ -369,8 +379,7 @@ mod tests {
             combine(&[
                 tagged_path("foo.x"),
                 tagged_path(format!("foo-{a}-{b}-{c}.x")),
-            ])
-            .collect::<Vec<_>>(),
+            ]),
             [
                 PathBuf::from("foo/_.x"),
                 PathBuf::from(format!("foo/{a}-{b}/{c}.x")),
@@ -380,16 +389,13 @@ mod tests {
 
     #[test]
     fn combine_adds_filler_tag() {
-        assert_eq!(
-            combine(&[tagged_path(".x")]).collect::<Vec<_>>(),
-            [PathBuf::from("_.x")]
-        );
+        assert_eq!(combine(&[tagged_path(".x")]), [PathBuf::from("_.x")]);
     }
 
     #[test]
     fn combine_adds_different_filler_tags_to_multiple_paths_with_same_extension() {
         assert_eq!(
-            combine(&[tagged_path(".x"), tagged_path(".x")]).collect::<Vec<_>>(),
+            combine(&[tagged_path(".x"), tagged_path(".x")]),
             [PathBuf::from("_1.x"), PathBuf::from("_2.x")]
         );
     }
@@ -397,7 +403,7 @@ mod tests {
     #[test]
     fn combine_adds_same_filler_tag_to_multiple_paths_with_different_extensions() {
         assert_eq!(
-            combine(&[tagged_path(".x"), tagged_path(".y")]).collect::<Vec<_>>(),
+            combine(&[tagged_path(".x"), tagged_path(".y")]),
             [PathBuf::from("_.x"), PathBuf::from("_.y")]
         );
     }
@@ -405,7 +411,7 @@ mod tests {
     #[test]
     fn combine_adds_filler_tag_after_slash() {
         assert_eq!(
-            combine(&[tagged_path("a.x"), tagged_path("a-b.x"),]).collect::<Vec<_>>(),
+            combine(&[tagged_path("a.x"), tagged_path("a-b.x")]),
             [PathBuf::from("a/_.x"), PathBuf::from("a/b.x")]
         );
     }
@@ -416,7 +422,7 @@ mod tests {
         let b = "b".repeat(100);
         let c = "c".repeat(100);
         assert_eq!(
-            combine(&[tagged_path(format!("{a}-{b}.{c}"))]).collect::<Vec<_>>(),
+            combine(&[tagged_path(format!("{a}-{b}.{c}"))]),
             [PathBuf::from(format!("{a}-{b}/_.{c}"))]
         );
     }
@@ -435,8 +441,12 @@ mod tests {
             })
             .collect::<Vec<_>>();
         prop_assert_eq!(
-            uncombine(combine(&paths).map(|path| TaggedPath::from_path(path).unwrap()))
-                .collect::<Vec<_>>(),
+            uncombine(
+                combine(&paths)
+                    .into_iter()
+                    .map(|path| TaggedPath::from_path(path).unwrap())
+            )
+            .collect::<Vec<_>>(),
             paths
         )
     }
