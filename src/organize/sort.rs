@@ -1,7 +1,7 @@
-use std::marker::Sync;
+use std::{marker::Sync, sync::mpsc, thread};
 
 use internment::Intern;
-use rayon::slice::ParallelSliceMut;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::{Tag, TaggedPath, TaggedPathRef};
 
@@ -19,77 +19,84 @@ use self::partition::{Partition, TagsPaths};
 /// because `bar` is more common than `baz`
 /// within the subset of paths containing `foo`,
 /// even though `baz` is more common globally.
-pub fn sort_tags_by_subfrequency<P>(paths: &[P]) -> impl Iterator<Item = TaggedPath>
+pub fn sort_tags_by_subfrequency<P>(paths: &[P]) -> Vec<TaggedPath>
 where
     P: AsRef<TaggedPathRef> + Sync,
 {
-    let mut res = sort_tags_by_subfrequency_(paths);
-    res.par_sort_unstable_by_key(|(i, _)| *i);
-    res.into_iter().map(|(_, path)| path)
+    let (sender, receiver) = mpsc::channel();
+    let len = paths.len();
+    let res = thread::spawn(move || {
+        let mut res = Vec::with_capacity(len);
+        let uninit = res.spare_capacity_mut();
+        for (i, path) in receiver.into_iter() {
+            let x: &mut std::mem::MaybeUninit<_> = &mut uninit[i]; // The Rust compiler can't infer this for some reason.
+            x.write(path);
+        }
+        // SAFETY: `receiver` contains an item for each index, which was just used to initialize the vector.
+        unsafe {
+            res.set_len(len);
+        }
+        res
+    });
+    sort_inner(&sender, paths, Partition::new(paths), Default::default());
+    drop(sender);
+    res.join().unwrap()
 }
 
-fn sort_tags_by_subfrequency_<P>(paths: &[P]) -> Vec<(usize, TaggedPath)>
-where
+fn sort_inner<P>(
+    sender: &mpsc::Sender<(usize, TaggedPath)>,
+    paths: &[P],
+    subpaths: Partition,
+    prefix: Vec<Intern<Tag>>,
+) where
     P: AsRef<TaggedPathRef> + Sync,
 {
-    fn sort_inner<P>(
-        paths: &[P],
-        subpaths: Partition,
-        prefix: Vec<Intern<Tag>>,
-    ) -> Vec<(usize, TaggedPath)>
-    where
-        P: AsRef<TaggedPathRef> + Sync,
-    {
-        stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
-            if let Some(tag) = tag_to_split(subpaths.tags_paths()) {
-                let (with_tag, without_tag) = subpaths.partition(tag);
-                debug_assert_ne!(with_tag.len(), 0);
+    stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
+        if let Some(tag) = tag_to_split(subpaths.tags_paths()) {
+            let (with_tag, without_tag) = subpaths.partition(tag);
+            debug_assert_ne!(with_tag.len(), 0);
 
-                let with_tag_prefix = prefix.iter().cloned().chain([tag]).collect();
-                let (mut xs, ys) = rayon::join(
-                    || sort_inner(paths, with_tag, with_tag_prefix),
-                    || sort_inner(paths, without_tag, prefix),
-                );
-                xs.extend(ys);
-                xs
-            } else {
-                debug_assert_eq!(subpaths.tags_paths().len(), 0);
-                subpaths
-                    .finalize()
-                    .map(|(i, mut inline_tags)| {
-                        inline_tags.sort_unstable_by(|tag, other| {
-                            tag.len()
-                                .cmp(&other.len())
-                                .reverse()
-                                .then_with(|| tag.cmp(other))
-                        });
-                        (
-                            i,
-                            TaggedPath::from_tags(
-                                prefix.iter().copied().chain(inline_tags),
-                                paths.get(i).unwrap().as_ref().ext(),
-                            ),
-                        )
-                    })
-                    .collect()
-            }
+            let with_tag_prefix = prefix.iter().cloned().chain([tag]).collect();
+            rayon::join(
+                || sort_inner(sender, paths, with_tag, with_tag_prefix),
+                || sort_inner(sender, paths, without_tag, prefix),
+            );
+        } else {
+            debug_assert_eq!(subpaths.tags_paths().len(), 0);
+            subpaths
+                .finalize()
+                .into_par_iter()
+                .map(|(i, mut inline_tags)| {
+                    inline_tags.sort_unstable_by(|tag, other| {
+                        tag.len()
+                            .cmp(&other.len())
+                            .reverse()
+                            .then_with(|| tag.cmp(other))
+                    });
+                    (
+                        i,
+                        TaggedPath::from_tags(
+                            prefix.iter().copied().chain(inline_tags),
+                            paths.get(i).unwrap().as_ref().ext(),
+                        ),
+                    )
+                })
+                .for_each(|x| sender.send(x).unwrap());
+        }
+    })
+}
+
+fn tag_to_split(tags_paths: &TagsPaths) -> Option<Intern<Tag>> {
+    tags_paths
+        .iter()
+        .map(|(tag, tag_paths)| (tag, tag_paths.len()))
+        .max_by(|(tag, count), (other_tag, other_count)| {
+            count
+                .cmp(other_count)
+                .then_with(|| tag.len().cmp(&other_tag.len()))
+                .then_with(|| tag.cmp(other_tag).reverse())
         })
-    }
-
-    fn tag_to_split(tags_paths: &TagsPaths) -> Option<Intern<Tag>> {
-        tags_paths
-            .iter()
-            .map(|(tag, tag_paths)| (tag, tag_paths.len()))
-            .max_by(|(tag, count), (other_tag, other_count)| {
-                count
-                    .cmp(other_count)
-                    .then_with(|| tag.len().cmp(&other_tag.len()))
-                    .then_with(|| tag.cmp(other_tag).reverse())
-            })
-            .map(|(tag, _)| *tag)
-    }
-
-    sort_inner(paths, Partition::new(paths), Default::default())
+        .map(|(tag, _)| *tag)
 }
 
 mod partition {
@@ -299,8 +306,8 @@ mod partition {
             &self.tags_paths
         }
 
-        pub fn finalize(self) -> impl Iterator<Item = (usize, SmallVec<[Intern<Tag>; 1]>)> {
-            self.done_paths.into_iter()
+        pub fn finalize(self) -> Vec<(usize, SmallVec<[Intern<Tag>; 1]>)> {
+            self.done_paths
         }
     }
 }
@@ -324,8 +331,7 @@ mod tests {
                 tagged_path("baz-foo-bar.x"),
                 tagged_path("baz.x"),
                 tagged_path("baz.x"),
-            ])
-            .collect::<Vec<_>>(),
+            ]),
             [
                 tagged_path("foo.x"),
                 tagged_path("foo.x"),
@@ -340,17 +346,14 @@ mod tests {
     #[test]
     fn sort_tags_breaks_ties_in_favor_of_increasing_length() {
         assert_eq!(
-            sort_tags_by_subfrequency(&[tagged_path("a-bb.x")]).collect::<Vec<_>>(),
+            sort_tags_by_subfrequency(&[tagged_path("a-bb.x")]),
             [tagged_path("bb-a.x")]
         )
     }
 
     #[proptest]
     fn sort_tags_is_idempotent(paths: TaggedPaths) {
-        let expected = sort_tags_by_subfrequency(&paths.0).collect::<Vec<_>>();
-        prop_assert_eq!(
-            sort_tags_by_subfrequency(&expected).collect::<Vec<_>>(),
-            expected
-        )
+        let expected = sort_tags_by_subfrequency(&paths.0);
+        prop_assert_eq!(sort_tags_by_subfrequency(&expected), expected)
     }
 }

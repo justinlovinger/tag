@@ -63,12 +63,9 @@ fn main() {
     .unwrap();
     paths
         .par_iter()
-        .zip(
-            combine(&sort_tags_by_subfrequency(&tagged_paths).collect::<Vec<_>>())
-                .par_iter()
-                .map(|path| tmp.join(path)),
-        )
+        .zip(combine(&sort_tags_by_subfrequency(&tagged_paths)))
         .for_each(|(path, link)| {
+            let link = tmp.join(link);
             create_dir_all(link.parent().unwrap()).unwrap();
             symlink(path.canonicalize().unwrap(), link).unwrap();
         });

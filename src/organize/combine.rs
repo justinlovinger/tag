@@ -78,7 +78,7 @@ where
         let mut res = Vec::with_capacity(len);
         let uninit = res.spare_capacity_mut();
         for (i, path) in receiver.into_iter() {
-            let x: &mut std::mem::MaybeUninit<PathBuf> = &mut uninit[i]; // The Rust compiler can't infer this for some reason.
+            let x: &mut std::mem::MaybeUninit<_> = &mut uninit[i]; // The Rust compiler can't infer this for some reason.
             x.write(path);
         }
         // SAFETY: `receiver` contains an item for each index, which was just used to initialize the vector.
