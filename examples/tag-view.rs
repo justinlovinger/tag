@@ -13,6 +13,7 @@ use std::{
 
 use clap::Parser;
 use itertools::Either;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use regex::Regex;
 use rustc_hash::FxHashSet;
 use tag::{
@@ -40,16 +41,19 @@ fn main() {
         args.paths
     };
 
-    let targets = paths.iter().map(|path| path.canonicalize().unwrap());
-
-    let tags = paths.iter().map(|path| tags(&root, path));
-    let exts = paths.iter().map(|path| {
-        TaggedPathRef::new(path.to_str().unwrap()).map_or(ExtRef::empty(), |x| x.ext())
-    });
-    let tagged_paths = tags
-        .zip(exts)
-        .map(|(tags, ext)| TaggedPath::from_tags(tags, ext))
-        .collect::<Vec<_>>();
+    let tagged_paths = {
+        let mut tagged_paths = Vec::new();
+        paths
+            .par_iter()
+            .map(|path| {
+                TaggedPath::from_tags(
+                    tags(&root, path),
+                    TaggedPathRef::new(path.to_str().unwrap()).map_or(ExtRef::empty(), |x| x.ext()),
+                )
+            })
+            .collect_into_vec(&mut tagged_paths);
+        tagged_paths
+    };
 
     let tmp = PathBuf::from_str(
         String::from_utf8(Command::new("mktemp").arg("-d").output().unwrap().stdout)
@@ -57,14 +61,17 @@ fn main() {
             .trim(),
     )
     .unwrap();
-    for (target, link) in targets.zip(
-        combine(&sort_tags_by_subfrequency(&tagged_paths).collect::<Vec<_>>())
-            .into_iter()
-            .map(|path| tmp.join(path)),
-    ) {
-        create_dir_all(link.parent().unwrap()).unwrap();
-        symlink(target, link).unwrap();
-    }
+    paths
+        .par_iter()
+        .zip(
+            combine(&sort_tags_by_subfrequency(&tagged_paths).collect::<Vec<_>>())
+                .par_iter()
+                .map(|path| tmp.join(path)),
+        )
+        .for_each(|(path, link)| {
+            create_dir_all(link.parent().unwrap()).unwrap();
+            symlink(path.canonicalize().unwrap(), link).unwrap();
+        });
 
     println!("{}", tmp.display());
 }
