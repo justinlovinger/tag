@@ -1,11 +1,14 @@
 use std::{
     env::current_dir,
     fmt,
-    io::{self, Write},
+    io::{self, stdin, Write},
     path::PathBuf,
 };
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{
+    error::{ContextKind, ContextValue},
+    CommandFactory, Parser, Subcommand, ValueEnum,
+};
 use tag::{combine, find, sort_tags_by_subfrequency, uncombine, Tag, TaggedPath};
 
 #[derive(Parser)]
@@ -102,20 +105,60 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Find { include, exclude }) => {
             print(find(current_dir()?, include, exclude)?)?
         }
-        Some(Commands::Sort { method, paths }) => print(match method {
-            SortMethod::Subfrequency => sort_tags_by_subfrequency(&paths),
-        })?,
-        Some(Commands::Combine { paths }) => {
+        Some(Commands::Sort { method, mut paths }) => {
+            if paths.is_empty() {
+                paths = stdin_paths().collect();
+            }
+
+            print(match method {
+                SortMethod::Subfrequency => sort_tags_by_subfrequency(&paths),
+            })?
+        }
+        Some(Commands::Combine { mut paths }) => {
+            if paths.is_empty() {
+                paths = stdin_paths().collect();
+            }
+
             let mut out = stdout();
             for path in combine(&paths) {
                 writeln!(out, "{}", path.display())?
             }
         }
-        Some(Commands::Uncombine { paths }) => print(uncombine(paths))?,
+        Some(Commands::Uncombine { paths }) => {
+            if paths.is_empty() {
+                print(uncombine(stdin_paths()))?
+            } else {
+                print(uncombine(paths))?
+            }
+        }
         None => {}
     }
 
     Ok(())
+}
+
+fn stdin_paths() -> impl Iterator<Item = TaggedPath> {
+    stdin()
+        .lines()
+        .map(|line| match TaggedPath::new(line.unwrap()) {
+            Ok(x) => x,
+            Err(e) => {
+                let mut err = clap::Error::new(clap::error::ErrorKind::ValueValidation);
+                err.insert(
+                    ContextKind::Usage,
+                    ContextValue::StyledStr(e.to_string().into()),
+                );
+                err.insert(
+                    ContextKind::InvalidArg,
+                    ContextValue::String("PATH".to_owned()),
+                );
+                err.insert(
+                    ContextKind::InvalidValue,
+                    ContextValue::String(e.into_string()),
+                );
+                err.format(&mut Args::command()).exit()
+            }
+        })
 }
 
 fn print<T>(it: impl IntoIterator<Item = T>) -> io::Result<()>
