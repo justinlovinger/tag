@@ -44,18 +44,25 @@ where
 /// Return paths without directory separators or `_[0-9]*` tags
 ///
 /// Paths are returned in the order given.
-pub fn uncombine<P>(paths: impl IntoIterator<Item = P>) -> impl Iterator<Item = TaggedPath>
+pub fn uncombine<I, P>(paths: I) -> Vec<TaggedPath>
 where
+    I: IntoParallelIterator<Item = P>,
+    I::Iter: IndexedParallelIterator,
     P: AsRef<TaggedPathRef>,
 {
     static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^_[0-9]*$").unwrap());
-    paths.into_iter().map(|path| {
-        let path = path.as_ref();
-        TaggedPath::from_tags(
-            path.tags().filter(|tag| !RE.is_match(tag.as_str())),
-            path.ext(),
-        )
-    })
+    let mut res = Vec::new();
+    paths
+        .into_par_iter()
+        .map(|path| {
+            let path = path.as_ref();
+            TaggedPath::from_tags(
+                path.tags().filter(|tag| !RE.is_match(tag.as_str())),
+                path.ext(),
+            )
+        })
+        .collect_into_vec(&mut res);
+    res
 }
 
 fn combine_<P, T>(mut paths: Vec<(usize, (P, Vec<T>))>) -> Vec<PathBuf>
@@ -447,8 +454,8 @@ mod tests {
                 combine(&paths)
                     .into_iter()
                     .map(|path| TaggedPath::from_path(path).unwrap())
-            )
-            .collect::<Vec<_>>(),
+                    .collect::<Vec<_>>()
+            ),
             paths
         )
     }

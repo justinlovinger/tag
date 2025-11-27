@@ -124,12 +124,12 @@ fn main() -> anyhow::Result<()> {
                 writeln!(out, "{}", path.display())?
             }
         }
-        Some(Commands::Uncombine { paths }) => {
+        Some(Commands::Uncombine { mut paths }) => {
             if paths.is_empty() {
-                print(uncombine(stdin_paths()))?
-            } else {
-                print(uncombine(paths))?
+                paths = stdin_paths().collect();
             }
+
+            print(uncombine(paths))?
         }
         None => {}
     }
