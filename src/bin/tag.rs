@@ -14,15 +14,6 @@ use tag::{combine, find, sort_tags_by_subfrequency, uncombine, Tag, TaggedPath};
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Use given path as working directory
-    ///
-    /// All other paths will be resolved
-    /// relative to this path.
-    /// This is equivalent to calling `cd PATH`
-    /// before running this program.
-    #[arg(long, value_name = "PATH")]
-    working_directory: Option<PathBuf>,
-
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -35,8 +26,14 @@ enum Commands {
     Ext { path: TaggedPath },
     /// Print tagged paths with given tags
     Find {
+        /// Find tagged paths relative to this path
+        ///
+        /// Only tags relative to this path are considered.
+        #[arg(value_name = "PATH")]
+        dir: Option<PathBuf>,
+
         /// Find paths including _all_ these tags
-        #[arg(value_name = "TAG")]
+        #[arg(long, short, value_name = "TAG")]
         include: Vec<Tag>,
 
         /// Ignore paths including _any_ of these tags
@@ -95,16 +92,18 @@ enum SortMethod {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    if let Some(path) = args.working_directory {
-        std::env::set_current_dir(path)?;
-    }
-
     match args.command {
         Some(Commands::Tags { path }) => print(path.tags())?,
         Some(Commands::Ext { path }) => println!("{}", path.ext()),
-        Some(Commands::Find { include, exclude }) => {
-            print(find(current_dir()?, include, exclude)?)?
-        }
+        Some(Commands::Find {
+            dir,
+            include,
+            exclude,
+        }) => print(find(
+            dir.unwrap_or_else(|| current_dir().unwrap()),
+            include,
+            exclude,
+        )?)?,
         Some(Commands::Sort { method, mut paths }) => {
             if paths.is_empty() {
                 paths = stdin_paths().collect();
