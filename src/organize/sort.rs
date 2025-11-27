@@ -1,9 +1,9 @@
-use std::{marker::Sync, sync::mpsc, thread};
+use std::{marker::Sync, sync::mpsc};
 
 use internment::Intern;
 use rayon::prelude::*;
 
-use crate::{Tag, TaggedPath, TaggedPathRef};
+use crate::{organize::into_iter_rayon, Tag, TaggedPath, TaggedPathRef};
 
 use self::partition::{Partition, TagsPaths};
 
@@ -25,22 +25,24 @@ where
 {
     let (sender, receiver) = mpsc::channel();
     let len = paths.len();
-    let res = thread::spawn(move || {
-        let mut res = Vec::with_capacity(len);
-        let uninit = res.spare_capacity_mut();
-        for (i, path) in receiver.into_iter() {
-            let x: &mut std::mem::MaybeUninit<_> = &mut uninit[i]; // The Rust compiler can't infer this for some reason.
-            x.write(path);
-        }
-        // SAFETY: `receiver` contains an item for each index, which was just used to initialize the vector.
-        unsafe {
-            res.set_len(len);
-        }
-        res
-    });
-    sort_inner(&sender, paths, Partition::new(paths), Default::default());
-    drop(sender);
-    res.join().unwrap()
+    rayon::join(
+        move || {
+            sort_inner(&sender, paths, Partition::new(paths), Default::default());
+        },
+        move || {
+            let mut res = Vec::with_capacity(len);
+            let uninit = res.spare_capacity_mut();
+            into_iter_rayon(receiver, |(i, path)| {
+                uninit[i].write(path);
+            });
+            // SAFETY: `receiver` contains an item for each index, which was just used to initialize the vector.
+            unsafe {
+                res.set_len(len);
+            }
+            res
+        },
+    )
+    .1
 }
 
 fn sort_inner<P>(

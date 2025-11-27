@@ -2,7 +2,6 @@ use std::{
     marker::Sync,
     path::{Path, PathBuf},
     sync::{mpsc, LazyLock},
-    thread,
 };
 
 use itertools::Itertools;
@@ -12,8 +11,8 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::{
-    TagRef, TaggedPath, TaggedPathRef, DIR_SEPARATOR, EXT_SEPARATOR, INLINE_SEPARATOR,
-    PATH_PART_MAX_LEN,
+    organize::into_iter_rayon, TagRef, TaggedPath, TaggedPathRef, DIR_SEPARATOR, EXT_SEPARATOR,
+    INLINE_SEPARATOR, PATH_PART_MAX_LEN,
 };
 
 const FILLER_TAG: char = '_';
@@ -74,22 +73,24 @@ where
 
     let (sender, receiver) = mpsc::channel();
     let len = paths.len();
-    let res = thread::spawn(move || {
-        let mut res = Vec::with_capacity(len);
-        let uninit = res.spare_capacity_mut();
-        for (i, path) in receiver.into_iter() {
-            let x: &mut std::mem::MaybeUninit<_> = &mut uninit[i]; // The Rust compiler can't infer this for some reason.
-            x.write(path);
-        }
-        // SAFETY: `receiver` contains an item for each index, which was just used to initialize the vector.
-        unsafe {
-            res.set_len(len);
-        }
-        res
-    });
-    combine_inner(&sender, &paths, &PathBuf::new(), 0);
-    drop(sender);
-    res.join().unwrap()
+    rayon::join(
+        move || {
+            combine_inner(&sender, &paths, &PathBuf::new(), 0);
+        },
+        move || {
+            let mut res = Vec::with_capacity(len);
+            let uninit = res.spare_capacity_mut();
+            into_iter_rayon(receiver, |(i, path)| {
+                uninit[i].write(path);
+            });
+            // SAFETY: `receiver` contains an item for each index, which was just used to initialize the vector.
+            unsafe {
+                res.set_len(len);
+            }
+            res
+        },
+    )
+    .1
 }
 
 fn combine_inner<P, T>(
