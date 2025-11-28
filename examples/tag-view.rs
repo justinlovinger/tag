@@ -23,6 +23,14 @@ use tag::{
 #[derive(Parser)]
 #[command(author, version, about = "A script to create a view of tagged paths", long_about = None)]
 struct Args {
+    /// Directory to create the view in
+    ///
+    /// The directory is not cleared automatically.
+    /// Existing files may conflict.
+    #[arg(long, short)]
+    dir: Option<PathBuf>,
+
+    /// Paths to create a view of
     paths: Vec<PathBuf>,
 }
 
@@ -31,6 +39,16 @@ fn main() {
 
     let cwd = current_dir().unwrap();
     let root = Root::new(&cwd).unwrap().unwrap();
+
+    let dir = args.dir.unwrap_or_else(|| {
+        PathBuf::from_str(
+            String::from_utf8(Command::new("mktemp").arg("-d").output().unwrap().stdout)
+                .unwrap()
+                .trim(),
+        )
+        .unwrap()
+    });
+    create_dir_all(&dir).unwrap();
 
     let paths = if args.paths.is_empty() {
         find(cwd, Vec::new(), Vec::new())
@@ -55,22 +73,16 @@ fn main() {
         tagged_paths
     };
 
-    let tmp = PathBuf::from_str(
-        String::from_utf8(Command::new("mktemp").arg("-d").output().unwrap().stdout)
-            .unwrap()
-            .trim(),
-    )
-    .unwrap();
     paths
         .par_iter()
         .zip(combine(&sort_tags_by_subfrequency(&tagged_paths)))
         .for_each(|(path, link)| {
-            let link = tmp.join(link);
+            let link = dir.join(link);
             create_dir_all(link.parent().unwrap()).unwrap();
             symlink(path.canonicalize().unwrap(), link).unwrap();
         });
 
-    println!("{}", tmp.display());
+    println!("{}", dir.display());
 }
 
 fn tags<'a>(root: &'a Root, path: &'a Path) -> impl Iterator<Item = Tag> + 'a {
