@@ -21,7 +21,7 @@ use tag::{
 };
 
 #[derive(Parser)]
-#[command(author, version, about = "A script to create a view of tagged paths", long_about = None)]
+#[command(author, version, about = "Create a view of tagged paths", long_about = None)]
 struct Args {
     /// Directory to create the view in
     ///

@@ -11,7 +11,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use tag::{combine, find, sort_tags_by_subfrequency, uncombine};
 
 #[derive(Parser)]
-#[command(author, version, about = "A script to organize tagged paths in-place", long_about = None)]
+#[command(author, version, about = "Organize tagged paths in-place", long_about = None)]
 struct Args {
     /// Directory to organize
     dir: Option<PathBuf>,

@@ -6,7 +6,7 @@ See `0.0.0` for the old and stable version.
 
 # Tag
 
-A utility to manage paths with a simple tagging system.
+Manage paths with a simple tagging system.
 The code is multithreaded and built with performance in mind.
 
 ## Syntax
