@@ -53,6 +53,7 @@
           mkShell {
             buildInputs = [
               cargo
+              cargo-edit
               cargo-tarpaulin
               rust-analyzer
               rustc
