@@ -49,6 +49,8 @@ The term does _not_ imply a separately mounted filesystem.
 ## Building
 
 Run `cargo build --release` or `nix build`.
+Examples can be build using `cargo build --release --example EXAMPLE`
+or `nix build .#EXAMPLE`.
 
 ## Usage
 
