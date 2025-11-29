@@ -36,6 +36,16 @@
               '';
             };
           };
+
+          tag-organize = naersk-lib.buildPackage {
+            pname = "tag-organize";
+            src = ./.;
+            overrideMain = old: {
+              preConfigure = ''
+                cargo_build_options="$cargo_build_options --example tag-organize"
+              '';
+            };
+          };
         };
 
         devShell =

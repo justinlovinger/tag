@@ -60,3 +60,5 @@ See `tag --help` and `tag [COMMAND] --help` for CLI instructions.
 
 See `examples/tag-view.rs` for an example of creating a symlinked view of tagged paths,
 including implied and inferred tags.
+
+See `examples/tag-organize.rs` for an example of organizing tagged files in-place.
