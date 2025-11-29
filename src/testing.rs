@@ -1,11 +1,12 @@
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 use crate::{DIR_SEPARATOR, INLINE_SEPARATOR};
 
 #[allow(unused_imports)]
 pub use self::{ext::*, fs::*, tag::*, tagged_filesystem::*, tagged_path::*};
 
-static SEPARATOR_REGEX: Lazy<String> = Lazy::new(|| format!("[{INLINE_SEPARATOR}{DIR_SEPARATOR}]"));
+static SEPARATOR_REGEX: LazyLock<String> =
+    LazyLock::new(|| format!("[{INLINE_SEPARATOR}{DIR_SEPARATOR}]"));
 
 mod fs {
     use std::{

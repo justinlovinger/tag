@@ -231,7 +231,8 @@ impl TaggedPathRef {
 
 #[cfg(test)]
 mod tests {
-    use once_cell::sync::Lazy;
+    use std::sync::LazyLock;
+
     use proptest::prelude::*;
     use test_strategy::proptest;
 
@@ -346,6 +347,6 @@ mod tests {
         prop_assert_eq!(path.ext(), raw_path.ext.as_ref());
     }
 
-    static MAYBE_TAGGED_PATH: Lazy<String> =
-        Lazy::new(|| format!(r"\PC{{0,16}}{EXT_SEPARATOR}[a-z-_.]{{0,16}}",));
+    static MAYBE_TAGGED_PATH: LazyLock<String> =
+        LazyLock::new(|| format!(r"\PC{{0,16}}{EXT_SEPARATOR}[a-z-_.]{{0,16}}",));
 }

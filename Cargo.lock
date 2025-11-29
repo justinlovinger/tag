@@ -748,7 +748,6 @@ dependencies = [
  "indoc",
  "internment",
  "itertools",
- "once_cell",
  "proptest",
  "rayon",
  "ref-cast",
