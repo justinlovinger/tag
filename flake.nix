@@ -48,7 +48,7 @@
           };
         };
 
-        devShell =
+        devShells.default =
           with pkgs;
           mkShell {
             buildInputs = [
