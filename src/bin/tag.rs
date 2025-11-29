@@ -9,7 +9,7 @@ use clap::{
     error::{ContextKind, ContextValue},
     CommandFactory, Parser, Subcommand, ValueEnum,
 };
-use tag::{combine, find, sort_tags_by_subfrequency, uncombine, Tag, TaggedPath};
+use tag::{combine, find, sort_tags_by_subfrequency, uncombine, Ext, Tag, TaggedPath};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -20,11 +20,13 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Print a tagged path with the given tags and extension
+    Path { tags: Vec<Tag>, ext: Ext },
     /// Print tags in the given path
     Tags { path: TaggedPath },
     /// Print extension of the given path
     Ext { path: TaggedPath },
-    /// Print tagged paths with given tags
+    /// Find tagged paths in the filesystem
     Find {
         /// Find tagged paths relative to this path
         ///
@@ -93,6 +95,7 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     match args.command {
+        Some(Commands::Path { tags, ext }) => println!("{}", TaggedPath::from_tags(tags, ext)),
         Some(Commands::Tags { path }) => print(path.tags())?,
         Some(Commands::Ext { path }) => println!("{}", path.ext()),
         Some(Commands::Find {
