@@ -13,7 +13,6 @@ license = "MIT"
 [dependencies]
 anyhow = "1.0.75"
 clap = { version = "4.1.4", features = ["derive"] }
-crossbeam-channel = "0.5.8"
 derive_more = "0.99.17"
 indoc = "2.0.6"
 internment = "0.7.1"

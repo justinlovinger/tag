@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::mpsc,
+};
 
 use rustc_hash::FxHashSet;
 
@@ -23,11 +26,11 @@ where
     })
 }
 
-fn tagged_paths<P>(dir: P) -> crossbeam_channel::IntoIter<TaggedPath>
+fn tagged_paths<P>(dir: P) -> mpsc::IntoIter<TaggedPath>
 where
     P: AsRef<Path>,
 {
-    let (sender, receiver) = crossbeam_channel::unbounded();
+    let (sender, receiver) = mpsc::channel();
     for_each_tagged_path(dir, move |path| sender.send(path).unwrap());
     receiver.into_iter()
 }
@@ -35,11 +38,11 @@ where
 fn filtered_tagged_paths<P>(
     dir: P,
     predicate: impl Fn(&TaggedPath) -> bool + Send + Sync + 'static,
-) -> crossbeam_channel::IntoIter<TaggedPath>
+) -> mpsc::IntoIter<TaggedPath>
 where
     P: AsRef<Path>,
 {
-    let (sender, receiver) = crossbeam_channel::unbounded();
+    let (sender, receiver) = mpsc::channel();
     for_each_tagged_path(dir, move |path| {
         if predicate(&path) {
             sender.send(path).unwrap()
