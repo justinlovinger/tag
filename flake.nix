@@ -18,7 +18,8 @@
         pkgs = import nixpkgs { inherit system; };
         naersk-lib = pkgs.callPackage naersk { };
       in
-      {
+      rec {
+        defaultPackage = packages.default;
         packages = rec {
           default = tag;
 
